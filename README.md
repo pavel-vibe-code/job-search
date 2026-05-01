@@ -20,8 +20,8 @@ You wake up Monday with 0–10 new candidates pre-vetted. No more manually trawl
 
 ```bash
 # 1. Install
-git clone https://github.com/<owner>/ai50-job-search.git
-claude --plugin-dir ./ai50-job-search
+git clone https://github.com/pavel-vibe-code/job-search.git
+claude --plugin-dir ./job-search
 
 # 2. Mint a Notion integration token at notion.so/profile/integrations,
 #    share one Notion page with it (the integration's "anchor"), then:
@@ -81,7 +81,7 @@ This plugin owns the scattered-source problem: fetches everything, runs your fil
 
 - **[INSTALL.md](INSTALL.md)** — installation + Cloud Routine setup, two paths (local interactive, cloud scheduled)
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — full technical reference: pipeline, discovery layer, scoring, failure handling, technology choices
-- **[CHANGELOG.md](CHANGELOG.md)** — release notes; v2.3.0 is the current public release
+- **[CHANGELOG.md](CHANGELOG.md)** — release notes; v2.3.2 is the current release
 
 ---
 
@@ -97,7 +97,7 @@ This plugin owns the scattered-source problem: fetches everything, runs your fil
 
 ## Status
 
-v2.3.0 — distribution-ready. Runs reliably as a weekly Cloud Routine. Tested end-to-end against a fresh Notion workspace.
+v2.3.2 — distribution-ready. Runs reliably as a weekly Cloud Routine. Tested end-to-end against a fresh Notion workspace.
 
 Known limitations (see ARCHITECTURE.md §14):
 - `removed_jobs_pending` (closures the agent didn't reach mid-failure) currently relies on next run's diff to re-surface; rare edge case can lose a closure.

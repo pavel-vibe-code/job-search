@@ -4,6 +4,35 @@ All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Chang
 
 ---
 
+## [2.3.2] — 2026-05-01
+
+### Two-persona INSTALL flow + Routine-clone concept doc
+
+The `Path A (local) → Path B (cloud)` install split conflated two orthogonal axes: deployment mode and user persona. Restructured around the persona axis (Quick vs Advanced) so both deployment modes work for both personas. Plus filled in three Routine-clone concept gaps that v2.3.0/v2.3.1 INSTALL.md left implicit.
+
+- **Restructured** — `INSTALL.md` is now: §1 source acquisition (Quick: clone upstream / Advanced: fork+clone+upstream-remote), §2 install + Notion setup (shared), §3 Cloud Routine (shared, Repository field differs), §4 stay-in-sync with upstream (Quick: `git pull`; Advanced: `git fetch upstream && git merge && git push`).
+- **New** — §3.0 "How a Routine actually runs" — concept block at the top of §3 explaining: clones-fresh-each-run, GitHub access prereq, public-vs-private-repo behaviour, what persists across runs vs not (only Notion), where the permission allowlist comes from. Closes the conceptual gap that left users guessing whether code changes need a "deploy" step (they don't — push to repo, next run picks it up).
+- **New** — Repository field documented in §3.3 Routine-create table. Previously the table jumped Trigger/Schedule/Plugin/Environment without ever telling the user which GitHub repo gets cloned.
+- **New** — `/web-setup` pointer for users whose claude.ai account isn't GitHub-connected.
+- **New** — Troubleshooting entry for "Routine clone fails with 404" (private-repo auth diagnosis).
+- **Updated** — Quick path's `git clone` URL is `pavel-vibe-code/job-search` (no longer a `<owner>` placeholder).
+
+### Plugin renamed to match repo
+
+The plugin's technical identifier in `.claude-plugin/plugin.json` was `ai50-job-search` while the repo on GitHub is `job-search`. The discrepancy was harmless functionally but cosmetically confusing in the Routine UI's Plugin field and the install instructions.
+
+- **Renamed** — `plugin.json["name"]`: `ai50-job-search` → `job-search`. Display name "AI 50 Job Search" (in README, ARCHITECTURE, branding) is unchanged — only the technical identifier moved.
+- **Updated** — `skills/run-job-search/SKILL.md` references to the plugin name (was `ai50-job-search-code` — also dropped the stale `-code` suffix carried over from a pre-v2.3 working folder).
+- **Updated** — `README.md` Quick start clone URL + version refs (v2.3.0 → v2.3.2).
+- **Not changed** — `~/.config/ai50-job-search/notion-token` filesystem path. Renaming would force users to migrate existing token files; the plugin-name discrepancy from the path is acceptable since the path is internal to the user's machine.
+- **Not changed** — Python scripts' `User-Agent` strings (`ai50-job-search/X.Y`). Cosmetic, low-impact, deferred.
+
+### Versions
+
+- Plugin: 2.3.1 → 2.3.2
+
+---
+
 ## [2.3.1] — 2026-05-01
 
 ### Ship `.claude/settings.json` for Routine support

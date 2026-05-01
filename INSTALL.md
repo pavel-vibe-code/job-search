@@ -1,11 +1,13 @@
 # AI 50 Job Search — Installation
 
-Two paths:
+A 5-minute setup. Pick an install style:
 
-- **Path A — Local interactive use only.** Five minutes. You run the search manually whenever you want.
-- **Path B — Cloud Routine (scheduled, unattended).** Path A first, then ~10 more minutes to schedule weekly runs.
+| Style | If you want to... |
+|---|---|
+| **Quick** | Install + run as-is, never edit code. Track upstream automatically. |
+| **Advanced** | Edit code, add ATS adapters, customise the orchestrator, contribute back. Maintain your own fork. |
 
-Pick A if you want to try the plugin first; switch to B once you're happy with the output.
+Both styles support local interactive use AND scheduled Cloud Routines. They differ only in §1 (how you get the source) and §4 (how you stay current).
 
 ---
 
@@ -16,24 +18,51 @@ Pick A if you want to try the plugin first; switch to B once you're happy with t
 | Claude Code installed (CLI, desktop app, or claude.ai/code) | Plugin runtime |
 | Notion account | The plugin's data lives there |
 | Python 3 (always present on macOS / most Linux) | Helper scripts run in the plugin |
+| GitHub account | Required for Advanced (to fork); useful for Quick (Routine on private upstream forks needs auth) |
 
 ---
 
-## Path A — Local interactive use
+## 1. Get the plugin onto your machine
 
-### A.1 Install the plugin
+### 1.A — Quick
 
 ```bash
-# Option 1 — Claude Code marketplace (when listed)
-# Find "AI 50 Job Search" in the marketplace and click Install.
+git clone https://github.com/pavel-vibe-code/job-search.git
+cd job-search
+```
 
-# Option 2 — Git clone
-git clone https://github.com/<owner>/ai50-job-search.git
-cd ai50-job-search
+That's it for §1. You're ready for §2.
+
+### 1.B — Advanced
+
+```bash
+# 1. Fork pavel-vibe-code/job-search via the "Fork" button on GitHub.
+#    This creates github.com/<your-username>/job-search under your account.
+
+# 2. Clone YOUR fork (not upstream):
+git clone https://github.com/<your-username>/job-search.git
+cd job-search
+
+# 3. Add upstream as a remote so you can pull in upstream changes later:
+git remote add upstream https://github.com/pavel-vibe-code/job-search.git
+
+# Verify
+git remote -v
+# origin    https://github.com/<your-username>/job-search.git (fetch/push)
+# upstream  https://github.com/pavel-vibe-code/job-search.git (fetch/push)
+```
+
+---
+
+## 2. Install + Notion setup (same for both styles)
+
+### 2.1 — Load the plugin
+
+```bash
 claude --plugin-dir .
 ```
 
-### A.2 Mint a Notion integration token
+### 2.2 — Mint a Notion integration token
 
 1. Open https://www.notion.so/profile/integrations
 2. Click **"+ New integration"**
@@ -42,7 +71,7 @@ claude --plugin-dir .
 5. Capabilities: leave defaults (Read content, Update content, Insert content)
 6. Click **Save**, then copy the **Internal Integration Token** (starts with `secret_` or `ntn_`)
 
-### A.3 Share a parent page with the integration
+### 2.3 — Share a parent page with the integration
 
 The integration sees nothing by default. Pick one Notion page to act as the workspace anchor (e.g. an existing "Work" or "Job search" page) and grant the integration access to it:
 
@@ -52,7 +81,7 @@ The integration sees nothing by default. Pick one Notion page to act as the work
 
 The integration now has read/write access to that page and everything under it.
 
-### A.4 Run setup
+### 2.4 — Run setup
 
 In Claude Code:
 
@@ -64,7 +93,7 @@ The wizard asks ~10 questions:
 
 | Question | Example answer |
 |---|---|
-| Which deployment mode? | "Local" for path A; "Cloud Routine" for path B |
+| Which deployment mode? | "Local" for laptop-only; "Cloud Routine" if you'll schedule (you can switch later) |
 | What city and country are you based in? | "Berlin, Germany" |
 | Are you open to relocating? Where? | "EU only", "no", "open to US/Canada" |
 | Preferred work mode + nuances? | "remote in EU only, hybrid Berlin OK" |
@@ -75,7 +104,7 @@ The wizard asks ~10 questions:
 | Scoring criteria + priorities? | "Seniority: high — must. AI-native: high. Location: high. Series B+: medium." |
 | Customize Notion artifact names? | Defaults usually fine |
 | Auth method? | "API token (recommended)" |
-| Paste your Notion token | (the `ntn_...` from A.2) |
+| Paste your Notion token | (the `ntn_...` from §2.2) |
 | Pick parent page | Pick your "Work" / "Job search" page from the list |
 | Optional favorites? | Comma-list of extra companies, or skip |
 
@@ -88,13 +117,13 @@ When the wizard finishes, the plugin has created in Notion:
 - An **AI 50 Profile** page (your profile JSON; edit this directly to update)
 - An **AI 50 Favorites** page (your additional companies; edit directly to update)
 
-### A.5 First run
+### 2.5 — First run
 
 ```
 run the job search
 ```
 
-Takes 60-90 seconds. First run treats every job as new (empty state). You should see:
+Takes 60–90 seconds. First run treats every job as new (empty state). You should see:
 
 ```
 Fetch: 50 companies checked | N errored | 1 external
@@ -109,40 +138,58 @@ State: Notion DB ✓ (50 rows persisted)
 Hot list: <Notion page URL>
 ```
 
-That's it. Type `run the job search` whenever you want a fresh scan; the state DB ensures only NEW jobs get added.
+That's it for laptop-only use. Type `run the job search` whenever you want a fresh scan; the state DB ensures only NEW jobs get added.
 
-### A.6 Updating your profile
+### 2.6 — Updating your profile
 
 Edit the **AI 50 Profile** page in Notion directly. The profile is a JSON code block in the page body — edit the JSON, save the page, and the next run picks up the changes. Don't break the JSON or the run will fail loudly.
 
 ---
 
-## Path B — Cloud Routine (scheduled, unattended)
+## 3. Cloud Routine (optional — same for both styles)
 
-You must complete Path A first (the wizard creates the Notion structure on your laptop). Then:
+Once §2 is done, you can schedule weekly unattended runs.
 
-### B.1 Permission allowlist (already shipped)
+### 3.0 — How a Routine actually runs
+
+A Cloud Routine is a sandboxed container that fires on your schedule (e.g. every Monday 08:00). Each run:
+
+1. **Clones your repo from GitHub.** Whatever's on `main` at fire time gets pulled fresh into a new container. Code changes you push land in the next run automatically; no other "deploy" step.
+2. **Runs your setup script** (§3.2c) which recreates the `state/.setup_complete` sentinel and verifies the Notion token. Containers don't persist between runs, so this scaffolds fresh state each fire.
+3. **Loads your environment** — env vars (`NOTION_API_TOKEN`, `NOTION_PARENT_ANCHOR_ID`) and the network egress allowlist.
+4. **Executes the trigger prompt** — runs the `run-job-search` orchestrator skill end-to-end with no human in the loop.
+5. **Tears down.** Nothing persists outside Notion.
+
+The repo's `.claude/settings.json` (shipped since v2.3.1) supplies the tool-permission allowlist; without it the Routine would silently stall on the first Bash call. You don't have to write or edit it.
+
+**GitHub access prereq.** Routines clone via your claude.ai account's GitHub connection. Public repos work without auth. Private repos require the connection to have read access to the repo. If your claude.ai isn't GitHub-connected, run `/web-setup` in Claude Code to do the OAuth flow. Verify which GitHub account is linked at https://claude.ai/settings.
+
+**Quick vs Advanced for the Routine.** The Routine clones whatever repo URL you select in §3.3. Quick users select `pavel-vibe-code/job-search` (upstream) and get upstream improvements automatically. Advanced users select their own fork and decide when to pull upstream into their fork (see §4.B). The plugin code itself is identical either way; the difference is only who owns the cloned source.
+
+### 3.1 — Permission allowlist (already shipped)
 
 Cloud Routines run unattended — each Bash, Read, Write, and Edit tool call must be pre-approved or the run stalls silently with no prompt to recover.
 
-The repo ships **`.claude/settings.json`** at its root with the right allowlist (Bash patterns for the plugin's Python scripts, Read of config/state/schemas, Write/Edit of state/outputs/tmp). The Routine clones this with the rest of the repo and applies it automatically — **no action needed for Routine setup itself**.
+The repo ships **`.claude/settings.json`** at its root with the right allowlist (Bash patterns for the plugin's Python scripts, Read of `config`/`state`/`schemas`, Write/Edit of `state`/`outputs`/`tmp`). The Routine clones this with the rest of the repo and applies it automatically — **no action needed for Routine setup itself**.
 
-For Path A (clone + `cd ai50-job-search` + `claude --plugin-dir .`), Claude Code reads the same `./.claude/settings.json` from your CWD, so local interactive runs are pre-approved too.
+For local Path A (clone + `cd job-search` + `claude --plugin-dir .`), Claude Code reads the same `./.claude/settings.json` from your CWD, so local interactive runs are pre-approved too.
 
 If you install the plugin into a *different* project directory (e.g. via the marketplace once listed) so that your CWD is not the plugin repo, the shipped settings.json won't apply to that foreign session — copy the rules into your project's own `.claude/settings.json`.
 
 > **Why the wildcard form.** The Bash patterns use `*/scripts/<name>.py` rather than an absolute path. `${CLAUDE_PLUGIN_ROOT}` does **not** expand inside `Bash()` permission patterns, so the wildcard is the portable form that matches both your local laptop path and the Routine container path.
 
-### B.2 Create a Routine environment
+### 3.2 — Create a Routine environment
 
 Go to **claude.ai/code → Settings → Environments → New environment**.
 
-#### B.2a — Environment variables
+Name it something like `job-search-prod`.
+
+#### 3.2a — Environment variables
 
 In the **Environment variables** field (`.env` format, one `KEY=value` per line):
 
 ```
-NOTION_API_TOKEN=ntn_<your-token-from-step-A.2>
+NOTION_API_TOKEN=ntn_<your-token-from-step-2.2>
 NOTION_PARENT_ANCHOR_ID=<32-char-page-id>
 ```
 
@@ -151,11 +198,11 @@ NOTION_PARENT_ANCHOR_ID=<32-char-page-id>
 | `NOTION_API_TOKEN` | Yes | Auth for all Notion calls |
 | `NOTION_PARENT_ANCHOR_ID` | Recommended | Fallback anchor if the parent page goes missing. Without it, the Routine aborts on missing-parent (since there's no human to pick a new anchor). With it, the runtime auto-recreates under the anchor. |
 
-To find a page ID: open the page in Notion → click **•••** → **Copy link to view**. The 32-character string in the URL is the ID. Pick any page in your workspace where the integration has access; the plugin will recreate the hierarchy under it if needed.
+To find a page ID: open the page in Notion → click **•••** → **Copy link to view**. The 32-character string in the URL is the ID. The hyphenated form (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`) and the un-hyphenated form both work; if one is rejected, try the other.
 
 > **Security caveat:** Notion warns that environment variables are visible to anyone with edit access on the environment. For a personal account where only you have access, that's fine. For shared accounts: rotate the token regularly, or don't share the environment.
 
-#### B.2b — Allowed domains
+#### 3.2b — Allowed domains
 
 The Routine container has restricted egress; you allowlist hosts the plugin needs:
 
@@ -170,7 +217,7 @@ surgehq.ai
 
 Wildcards are allowed in the Routine UI's domains field.
 
-#### B.2c — Setup script
+#### 3.2c — Setup script
 
 In the **Setup script** field, paste this:
 
@@ -197,16 +244,19 @@ This runs once per Routine fire, before the agent starts. It:
 2. Creates `state/.setup_complete` (the wizard would create this on a normal install; Routine containers don't persist files between runs).
 3. Verifies the Notion token works.
 
-### B.3 Create the Routine
+### 3.3 — Create the Routine
 
 Go to **claude.ai/code → Routines → New Routine**.
 
 | Field | Value |
 |---|---|
-| **Trigger / prompt** | (see below) |
+| **Repository** | Quick: `pavel-vibe-code/job-search`. Advanced: `<your-username>/job-search` (your fork). |
+| **Plugin** | `job-search` (the plugin name from `.claude-plugin/plugin.json`, not the repo name) |
+| **Environment** | The one you created in §3.2 |
 | **Schedule** | Weekly (e.g. Monday 08:00 your TZ) |
-| **Plugin** | `ai50-job-search` |
-| **Environment** | The one you created in B.2 |
+| **Trigger / prompt** | (see below) |
+
+> **Tip — CLI alternative.** You can create the Routine from inside Claude Code instead of the web UI: run `/schedule` and walk through the prompts. It hits the same backend as the web form, so the resulting Routine appears at claude.ai/code/routines just the same. Useful when you want to script Routine creation alongside other terminal work; the web UI is more transparent for first-time setup. If `/schedule` reports your account isn't connected to GitHub, run `/web-setup` first.
 
 **Trigger prompt** (paste verbatim):
 
@@ -225,7 +275,7 @@ Routine context (no human in the loop):
 Then execute the run-job-search skill end-to-end and print the canonical run summary.
 ```
 
-### B.4 Test-fire the Routine
+### 3.4 — Test-fire the Routine
 
 In the Routine UI, click **Run now**. Watch the logs. A successful run looks like:
 
@@ -246,7 +296,7 @@ If it fails:
 - The fallback section in `skills/run-job-search/SKILL.md` covers most failure modes.
 - You can always re-run interactively on your laptop with `run the job search` to compare.
 
-### B.5 Maintenance
+### 3.5 — Maintenance
 
 The Routine fires on its schedule with no further action needed. Things to do periodically:
 
@@ -257,11 +307,45 @@ The Routine fires on its schedule with no further action needed. Things to do pe
 
 ---
 
+## 4. Staying in sync with upstream
+
+### 4.A — Quick
+
+Your local clone tracks upstream directly (since you cloned `pavel-vibe-code/job-search`):
+
+```bash
+cd /path/to/job-search
+git pull origin main
+```
+
+Your Cloud Routine clones upstream fresh on every fire, so it always picks up the latest `main` automatically — no action needed for the cloud side.
+
+### 4.B — Advanced — sync your fork
+
+Your local clone tracks YOUR fork. Pull upstream changes through your fork:
+
+```bash
+cd /path/to/job-search
+
+# Pull upstream into your local main:
+git fetch upstream
+git merge upstream/main          # or: git rebase upstream/main
+
+# Push the merge to your fork so the Routine sees it:
+git push origin main
+```
+
+The Routine clones your fork (per the Repository field in §3.3), so any upstream changes you want it to pick up need to land on your fork's `main`. If you want to pin to a specific upstream version and review changes manually, skip the merge and work off a branch.
+
+To contribute changes back to upstream: push to a branch on your fork, then open a PR from your fork to `pavel-vibe-code/job-search`.
+
+---
+
 ## Troubleshooting
 
 ### Setup fails with "object_not_found"
 
-The integration doesn't have access to the parent page. Re-do step A.3 (Connections → Add connections).
+The integration doesn't have access to the parent page. Re-do step §2.3 (Connections → Add connections).
 
 ### First run shows 0 candidates
 
@@ -273,16 +357,23 @@ Edit the AI 50 Profile page in Notion and check `excluded_countries` — it shou
 
 If you picked `auth_method = "mcp"` during setup but the Notion MCP isn't connected in the current Claude Code session: either reconnect Notion (claude.ai/code Connectors → Notion), or re-run setup and pick `auth_method = "api_token"` instead.
 
+### Routine clone fails with 404
+
+Your claude.ai account's GitHub connection doesn't have read access to the repo:
+- Confirm which GitHub account is connected at https://claude.ai/settings.
+- For private repos, the connection must specifically have access to that repo. If you authenticated via a GitHub App, check installation permissions at https://github.com/settings/installations.
+- Re-run `/web-setup` in Claude Code to re-authorize.
+
 ### Routine fires but does nothing
 
 Check the Routine logs. Most common causes:
-- Permission allowlist missing entries → Bash calls hang waiting for approval.
+- `.claude/settings.json` missing or stale → some Bash/Read/Write call is silently denied. Pull the latest from upstream (Routine clones latest, but a stale fork might lag).
 - `NOTION_API_TOKEN` env var not set or expired → setup script fails the auth pre-check.
 - Allowed domains missing the ATS hosts → fetch fails silently for some companies.
 
 ### State drift (jobs missing from tracker but marked "seen" in state DB)
 
-Pre-v2.3 behavior on compile-write failures. v2.3 has the un-poisoning fallback handler. If you're on v2.3+ and seeing this: check `outputs/<date>-tracker-fallback.md` — your missing rows are there, and the next run will retry them.
+Pre-v2.3 behavior on compile-write failures. v2.3+ has the un-poisoning fallback handler. If you're on v2.3+ and seeing this: check `outputs/<date>-tracker-fallback.md` — your missing rows are there, and the next run will retry them.
 
 ### Help
 

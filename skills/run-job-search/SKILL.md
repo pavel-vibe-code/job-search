@@ -424,7 +424,7 @@ Run these once before the first Routine execution:
 claude mcp add notion --transport sse https://mcp.notion.com/sse
 
 # 2. Load the plugin
-claude --plugin-dir ./ai50-job-search-code
+claude --plugin-dir ./job-search
 
 # 3. Run setup
 # Run: "set up the plugin" (creates Notion databases automatically if Notion MCP is connected)
@@ -436,7 +436,7 @@ claude --plugin-dir ./ai50-job-search-code
 **Create a Routine** at [claude.ai/code/routines](https://claude.ai/code/routines):
 - Trigger / prompt: see "Routine prompt" below
 - Schedule: weekly (e.g. every Monday 08:00)
-- Plugin: `ai50-job-search-code`
+- Plugin: `job-search`
 - **Environment** (claude.ai/code → Settings → Environments):
   - `NOTION_API_TOKEN=ntn_...` (your integration token)
   - `NOTION_PARENT_ANCHOR_ID=<32-char-page-id>` (optional but recommended) — a Notion page ID under which the plugin can recreate the entire hierarchy if `parent_page` ever goes missing. Without this, the Routine ABORTS on missing parent (since there's no human to ask for an anchor). Pick any page in your workspace where the plugin's integration has access; the plugin will create a child page named per `connectors.json[notion.names.parent_page]` if needed.

@@ -1,6 +1,6 @@
 {
-  "name": "ai50-job-search",
-  "version": "2.3.1",
+  "name": "job-search",
+  "version": "2.3.2",
   "description": "Automated job search across the Forbes AI 50 + user-defined favorites. Fetches listings via ATS APIs (Ashby, Greenhouse, Comeet), filters by a configurable candidate profile, validates listings are still live, scores against a user-customised rubric, writes qualifying jobs to Notion + a hot-list digest. Notion auth supports two modes: 'mcp' (interactive laptop use) and 'api_token' (recommended; required for Cloud Routines). Per-user IDs auto-resolve via name discovery on every run — no fork required for community use. Run 'set up the plugin' on first use.",
   "author": {
     "name": "Pavel Malyshev",
