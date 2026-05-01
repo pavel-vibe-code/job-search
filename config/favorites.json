@@ -1,0 +1,332 @@
+[
+  {
+    "_meta": true,
+    "_description": "Curated additions on top of config/companies.json. The plugin merges these with the AI 50 list at run time, deduping by name (so overlap with AI 50 is harmless — the 4 overlaps from Scaling Europe 50 are: Legora, Lovable, Mistral AI, n8n).",
+    "_source_blocks": {
+      "scaling_europe_50": "https://scalingeurope.co.uk/ — top 50 fastest-growing EU tech companies. Detected ATS coverage: 32/50 (25 ashby + 7 greenhouse). 18 are 'skip' until fetchers exist for their ATS — see each entry's _note."
+    },
+    "_runtime_behaviour": "Entries with ats='skip' are ignored by fetch-and-diff.py. Entries duplicating a name in companies.json are skipped (companies.json wins). Entries can be removed at any time; entries can also be added (e.g. via 'validate favorites' to detect ATS for a new company)."
+  },
+  {
+    "name": "Adfin",
+    "ats": "skip",
+    "slug": "adfin",
+    "source": "scaling_europe_50",
+    "_note": "ATS not auto-detected (probed Ashby, Greenhouse, Lever, Personio, Workable, Recruitee — none matched). Likely a smaller EU ATS (JazzHR, Smartrecruiters, Teamtailor, Pinpoint, etc.) or a custom careers page. Visit the company's website, identify the ATS via dev-tools network tab, and update the entry."
+  },
+  {
+    "name": "Aikido Security",
+    "ats": "skip",
+    "slug": "aikidosecurity",
+    "source": "scaling_europe_50",
+    "_note": "Likely uses recruitee. Detected at recruitee.com/aikidosecurity with 44 active listings. The plugin doesn't yet have a recruitee fetcher in scripts/fetch-and-diff.py — to enable: add a fetch_recruitee() / normalise_recruitee() pair following the existing fetch_ashby/fetch_greenhouse pattern, then change ats to 'recruitee' here.",
+    "_detected_ats": "recruitee",
+    "_detected_slug": "aikidosecurity"
+  },
+  {
+    "name": "Asap.Work",
+    "ats": "skip",
+    "slug": "asapwork",
+    "source": "scaling_europe_50",
+    "_note": "Likely uses recruitee. Detected at recruitee.com/asap with 17 active listings. The plugin doesn't yet have a recruitee fetcher in scripts/fetch-and-diff.py — to enable: add a fetch_recruitee() / normalise_recruitee() pair following the existing fetch_ashby/fetch_greenhouse pattern, then change ats to 'recruitee' here.",
+    "_detected_ats": "recruitee",
+    "_detected_slug": "asap"
+  },
+  {
+    "name": "Attio",
+    "ats": "ashby",
+    "slug": "attio",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Back Market",
+    "ats": "ashby",
+    "slug": "backmarket",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Bondio",
+    "ats": "skip",
+    "slug": "bondio",
+    "source": "scaling_europe_50",
+    "_note": "ATS not auto-detected (probed Ashby, Greenhouse, Lever, Personio, Workable, Recruitee — none matched). Likely a smaller EU ATS (JazzHR, Smartrecruiters, Teamtailor, Pinpoint, etc.) or a custom careers page. Visit the company's website, identify the ATS via dev-tools network tab, and update the entry."
+  },
+  {
+    "name": "Cogna",
+    "ats": "skip",
+    "slug": "cogna",
+    "source": "scaling_europe_50",
+    "_note": "ATS not auto-detected (probed Ashby, Greenhouse, Lever, Personio, Workable, Recruitee — none matched). Likely a smaller EU ATS (JazzHR, Smartrecruiters, Teamtailor, Pinpoint, etc.) or a custom careers page. Visit the company's website, identify the ATS via dev-tools network tab, and update the entry."
+  },
+  {
+    "name": "Curvestone",
+    "ats": "skip",
+    "slug": "curvestone",
+    "source": "scaling_europe_50",
+    "_note": "ATS not auto-detected (probed Ashby, Greenhouse, Lever, Personio, Workable, Recruitee — none matched). Likely a smaller EU ATS (JazzHR, Smartrecruiters, Teamtailor, Pinpoint, etc.) or a custom careers page. Visit the company's website, identify the ATS via dev-tools network tab, and update the entry."
+  },
+  {
+    "name": "Data & AI Literacy Academy",
+    "ats": "skip",
+    "slug": "dataailiteracyacademy",
+    "source": "scaling_europe_50",
+    "_note": "Possibly recruitee (slug 'data' is generic; likely a false positive — verify before enabling). The plugin doesn't yet have a recruitee fetcher anyway — verify the detection manually before adding one."
+  },
+  {
+    "name": "Dronamics",
+    "ats": "skip",
+    "slug": "dronamics",
+    "source": "scaling_europe_50",
+    "_note": "ATS not auto-detected (probed Ashby, Greenhouse, Lever, Personio, Workable, Recruitee — none matched). Likely a smaller EU ATS (JazzHR, Smartrecruiters, Teamtailor, Pinpoint, etc.) or a custom careers page. Visit the company's website, identify the ATS via dev-tools network tab, and update the entry."
+  },
+  {
+    "name": "Dwelly",
+    "ats": "greenhouse",
+    "slug": "dwelly",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Encord",
+    "ats": "ashby",
+    "slug": "encord",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Exein",
+    "ats": "skip",
+    "slug": "exein",
+    "source": "scaling_europe_50",
+    "_note": "ATS not auto-detected (probed Ashby, Greenhouse, Lever, Personio, Workable, Recruitee — none matched). Likely a smaller EU ATS (JazzHR, Smartrecruiters, Teamtailor, Pinpoint, etc.) or a custom careers page. Visit the company's website, identify the ATS via dev-tools network tab, and update the entry."
+  },
+  {
+    "name": "Finary",
+    "ats": "ashby",
+    "slug": "finary",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Fuse Energy",
+    "ats": "ashby",
+    "slug": "fuse",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Fyxer",
+    "ats": "ashby",
+    "slug": "fyxer",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "GetVocal",
+    "ats": "skip",
+    "slug": "getvocal",
+    "source": "scaling_europe_50",
+    "_note": "ATS not auto-detected (probed Ashby, Greenhouse, Lever, Personio, Workable, Recruitee — none matched). Likely a smaller EU ATS (JazzHR, Smartrecruiters, Teamtailor, Pinpoint, etc.) or a custom careers page. Visit the company's website, identify the ATS via dev-tools network tab, and update the entry."
+  },
+  {
+    "name": "Huzzle",
+    "ats": "skip",
+    "slug": "huzzle",
+    "source": "scaling_europe_50",
+    "_note": "ATS not auto-detected (probed Ashby, Greenhouse, Lever, Personio, Workable, Recruitee — none matched). Likely a smaller EU ATS (JazzHR, Smartrecruiters, Teamtailor, Pinpoint, etc.) or a custom careers page. Visit the company's website, identify the ATS via dev-tools network tab, and update the entry."
+  },
+  {
+    "name": "Kota",
+    "ats": "ashby",
+    "slug": "kota",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Langdock",
+    "ats": "ashby",
+    "slug": "langdock",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Lassie",
+    "ats": "ashby",
+    "slug": "lassie",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Lawhive",
+    "ats": "ashby",
+    "slug": "lawhive",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Legora",
+    "ats": "ashby",
+    "slug": "legora",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Light",
+    "ats": "ashby",
+    "slug": "light",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Lindus Health",
+    "ats": "ashby",
+    "slug": "lindushealth",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "LOW6",
+    "ats": "skip",
+    "slug": "low6",
+    "source": "scaling_europe_50",
+    "_note": "Possibly personio (host returned 0 jobs; may be inactive or wrong slug). The plugin doesn't yet have a personio fetcher anyway — verify the detection manually before adding one."
+  },
+  {
+    "name": "Lovable",
+    "ats": "ashby",
+    "slug": "lovable",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "MAGIC",
+    "ats": "greenhouse",
+    "slug": "magic",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Mistral AI",
+    "ats": "ashby",
+    "slug": "mistral",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "n8n",
+    "ats": "ashby",
+    "slug": "n8n",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Newcleo",
+    "ats": "skip",
+    "slug": "newcleo",
+    "source": "scaling_europe_50",
+    "_note": "ATS not auto-detected (probed Ashby, Greenhouse, Lever, Personio, Workable, Recruitee — none matched). Likely a smaller EU ATS (JazzHR, Smartrecruiters, Teamtailor, Pinpoint, etc.) or a custom careers page. Visit the company's website, identify the ATS via dev-tools network tab, and update the entry."
+  },
+  {
+    "name": "Nothing",
+    "ats": "greenhouse",
+    "slug": "nothing",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Nuclera",
+    "ats": "skip",
+    "slug": "nuclera",
+    "source": "scaling_europe_50",
+    "_note": "ATS not auto-detected (probed Ashby, Greenhouse, Lever, Personio, Workable, Recruitee — none matched). Likely a smaller EU ATS (JazzHR, Smartrecruiters, Teamtailor, Pinpoint, etc.) or a custom careers page. Visit the company's website, identify the ATS via dev-tools network tab, and update the entry."
+  },
+  {
+    "name": "Omnea",
+    "ats": "ashby",
+    "slug": "omnea",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Parloa",
+    "ats": "greenhouse",
+    "slug": "parloa",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Pivot",
+    "ats": "ashby",
+    "slug": "pivot",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "PolyAI",
+    "ats": "greenhouse",
+    "slug": "polyai",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Prelude",
+    "ats": "ashby",
+    "slug": "prelude",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Spore.Bio",
+    "ats": "skip",
+    "slug": "sporebio",
+    "source": "scaling_europe_50",
+    "_note": "ATS not auto-detected (probed Ashby, Greenhouse, Lever, Personio, Workable, Recruitee — none matched). Likely a smaller EU ATS (JazzHR, Smartrecruiters, Teamtailor, Pinpoint, etc.) or a custom careers page. Visit the company's website, identify the ATS via dev-tools network tab, and update the entry."
+  },
+  {
+    "name": "Submer",
+    "ats": "greenhouse",
+    "slug": "submer",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Sunsave",
+    "ats": "skip",
+    "slug": "sunsave",
+    "source": "scaling_europe_50",
+    "_note": "ATS not auto-detected (probed Ashby, Greenhouse, Lever, Personio, Workable, Recruitee — none matched). Likely a smaller EU ATS (JazzHR, Smartrecruiters, Teamtailor, Pinpoint, etc.) or a custom careers page. Visit the company's website, identify the ATS via dev-tools network tab, and update the entry."
+  },
+  {
+    "name": "Synthflow",
+    "ats": "ashby",
+    "slug": "synthflow",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Tandem Health",
+    "ats": "ashby",
+    "slug": "tandem-health",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Tem",
+    "ats": "ashby",
+    "slug": "tem",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Tequipy",
+    "ats": "skip",
+    "slug": "tequipy",
+    "source": "scaling_europe_50",
+    "_note": "ATS not auto-detected (probed Ashby, Greenhouse, Lever, Personio, Workable, Recruitee — none matched). Likely a smaller EU ATS (JazzHR, Smartrecruiters, Teamtailor, Pinpoint, etc.) or a custom careers page. Visit the company's website, identify the ATS via dev-tools network tab, and update the entry."
+  },
+  {
+    "name": "Timeleft",
+    "ats": "greenhouse",
+    "slug": "timeleft",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Tracebit",
+    "ats": "ashby",
+    "slug": "tracebit",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Wordsmith",
+    "ats": "ashby",
+    "slug": "wordsmith",
+    "source": "scaling_europe_50"
+  },
+  {
+    "name": "Zevero",
+    "ats": "skip",
+    "slug": "zevero",
+    "source": "scaling_europe_50",
+    "_note": "ATS not auto-detected (probed Ashby, Greenhouse, Lever, Personio, Workable, Recruitee — none matched). Likely a smaller EU ATS (JazzHR, Smartrecruiters, Teamtailor, Pinpoint, etc.) or a custom careers page. Visit the company's website, identify the ATS via dev-tools network tab, and update the entry."
+  },
+  {
+    "name": "ZOE",
+    "ats": "ashby",
+    "slug": "zoe",
+    "source": "scaling_europe_50"
+  }
+]

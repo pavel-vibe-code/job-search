@@ -1,0 +1,5 @@
+{
+  "_note": "Claude Code version — MCP servers are configured globally, not bundled here.",
+  "_setup": "Run: claude mcp add notion --transport sse https://mcp.notion.com/sse",
+  "_docs": "https://code.claude.com/docs/en/mcp"
+}

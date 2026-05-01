@@ -1,0 +1,75 @@
+{
+  "_comment": "Candidate profile and search rules. Edit this file to change who the search is optimized for.",
+
+  "_setup_note": "This file ships with sample data. Run 'run the job search' for first-time setup, or edit this file directly. In Cloud Routine mode this file is ignored — profile lives in a Notion page (see connectors.json[notion.profile_page_id]).",
+
+  "candidate": {
+    "current_location": "Berlin, Germany",
+    "open_to_relocation": false
+  },
+
+  "context": "Sample context — replace with your own. Example: '8 years in B2B SaaS, currently Senior Manager of Customer Success at a 300-person company. Looking for Director or VP roles at Series B+ AI-native companies. Strong background in building support automation and working with enterprise customers. Based in Berlin, EU work permit, prefer async-friendly companies.'",
+
+  "location_rules": {
+    "eligible_modes": ["remote", "hybrid"],
+    "eligible_regions": ["EU", "EMEA", "Europe"],
+    "excluded_cities": [],
+    "excluded_countries": []
+  },
+
+  "role_types": [
+    {
+      "id": "cx-support-leadership",
+      "label": "CX / Support Leadership",
+      "description": "Senior roles owning customer success, support, or post-sales teams — Director, VP, Head of level",
+      "search_keywords": ["Director Customer Success", "VP Customer Success", "Head of Customer Success", "Head of Support", "VP Support", "Director Support", "Customer Success Lead", "Head of CX"]
+    },
+    {
+      "id": "ai-transformation",
+      "label": "AI Transformation",
+      "description": "Roles focused on deploying AI within customer operations, support, or CX",
+      "search_keywords": ["AI Transformation", "Head of AI", "AI Operations", "AI Customer Experience", "Conversational AI", "Support AI", "CX AI Lead", "AI Implementation"]
+    },
+    {
+      "id": "gtm-adjacent-ic",
+      "label": "GTM-Adjacent IC",
+      "description": "Senior individual contributor roles bridging customer and product/engineering",
+      "search_keywords": ["Solutions Engineer", "Solutions Architect", "Forward Deployed Engineer", "Customer Engineer", "Technical Account Manager", "Staff Customer Success Engineer"]
+    },
+    {
+      "id": "pm-founding",
+      "label": "PM / Founding Roles",
+      "description": "Product Management or early founding-team roles at AI-native companies",
+      "search_keywords": ["Head of Product", "Product Lead", "Founding Product", "GM Customer", "General Manager", "Chief of Staff", "Head of Operations"]
+    }
+  ],
+
+  "scoring": {
+    "minimum_score": 5,
+    "criteria": {
+      "seniority_match":     {"weight": 2, "description": "Role is Director, VP, Head, Senior, Lead, or Staff level"},
+      "ai_native_company":   {"weight": 1, "description": "Company is AI-first, not a legacy company with an AI bolt-on"},
+      "remote_eligible":     {"weight": 1, "description": "Role explicitly allows remote work from candidate's eligible regions"},
+      "role_type_alignment": {"weight": 2, "description": "Role maps to one of the candidate's target role types"},
+      "experience_match":    {"weight": 1, "description": "Candidate's background is a strong match for this role"},
+      "growth_stage":        {"weight": 1, "description": "Company is Series B+ or post-revenue"}
+    },
+    "penalties": {
+      "language_requirement": -2,
+      "description": "Role explicitly requires fluency in a language the candidate does not speak"
+    },
+    "hot_score_threshold": 7
+  },
+
+  "exclusion_rules": [
+    "Must not require on-site presence in a city incompatible with candidate's base",
+    "Must not require fluency in a language other than English",
+    "Must not be entry-level or junior roles"
+  ],
+
+  "ats_platforms": {
+    "ashby":      "https://jobs.ashbyhq.com/{company}",
+    "greenhouse": "https://boards.greenhouse.io/{company}",
+    "lever":      "https://jobs.lever.co/{company}"
+  }
+}

@@ -1,0 +1,27 @@
+# Per-user state — generated at run time, never committed
+state/cached-ids.json
+state/companies.json
+state/.setup_complete
+
+# Claude Code per-project settings (user adds their own)
+.claude/settings.local.json
+
+# Outputs (markdown fallback files, run logs, ad-hoc dumps)
+outputs/
+
+# Notion token (should NEVER be in repo; defensive)
+**/notion-token
+**/.notion-token
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

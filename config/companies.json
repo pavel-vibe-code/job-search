@@ -1,0 +1,363 @@
+{
+  "_comment": "Forbes AI 50 + companies discovered via favorites. ATS types: ashby, greenhouse, comeet, html_static, static_roles, external, skip.",
+  "ashby_api": "https://api.ashbyhq.com/posting-api/job-board/{slug}",
+  "greenhouse_api": "https://boards-api.greenhouse.io/v1/boards/{slug}/jobs",
+  "companies": [
+    {
+      "name": "Abridge",
+      "ats": "ashby",
+      "slug": "abridge",
+      "source": "ai50"
+    },
+    {
+      "name": "Anthropic",
+      "ats": "greenhouse",
+      "slug": "anthropic",
+      "source": "ai50"
+    },
+    {
+      "name": "Applied Intuition",
+      "ats": "greenhouse",
+      "slug": "appliedintuition",
+      "source": "ai50"
+    },
+    {
+      "name": "Baseten",
+      "ats": "ashby",
+      "slug": "baseten",
+      "source": "ai50"
+    },
+    {
+      "name": "Black Forest Labs",
+      "ats": "greenhouse",
+      "slug": "blackforestlabs",
+      "source": "ai50"
+    },
+    {
+      "name": "Chai Discovery",
+      "ats": "ashby",
+      "slug": "chaidiscovery",
+      "source": "ai50"
+    },
+    {
+      "name": "Clay",
+      "ats": "ashby",
+      "slug": "claylabs",
+      "source": "ai50"
+    },
+    {
+      "name": "Cognition",
+      "ats": "ashby",
+      "slug": "cognition",
+      "source": "ai50"
+    },
+    {
+      "name": "Cohere",
+      "ats": "ashby",
+      "slug": "cohere",
+      "source": "ai50"
+    },
+    {
+      "name": "Crusoe",
+      "ats": "ashby",
+      "slug": "crusoe",
+      "source": "ai50"
+    },
+    {
+      "name": "Cursor",
+      "ats": "ashby",
+      "slug": "cursor",
+      "source": "ai50"
+    },
+    {
+      "name": "Cyera",
+      "ats": "comeet",
+      "slug": "cyera",
+      "company_id": "17.008",
+      "careers_url": "https://www.comeet.com/jobs/cyera/17.008",
+      "source": "ai50"
+    },
+    {
+      "name": "Databricks",
+      "ats": "greenhouse",
+      "slug": "databricks",
+      "source": "ai50"
+    },
+    {
+      "name": "Decagon",
+      "ats": "ashby",
+      "slug": "decagon",
+      "source": "ai50"
+    },
+    {
+      "name": "ElevenLabs",
+      "ats": "ashby",
+      "slug": "elevenlabs",
+      "source": "ai50"
+    },
+    {
+      "name": "EliseAI",
+      "ats": "ashby",
+      "slug": "eliseai",
+      "source": "ai50"
+    },
+    {
+      "name": "Fal",
+      "ats": "greenhouse",
+      "slug": "fal",
+      "source": "ai50"
+    },
+    {
+      "name": "Fireworks AI",
+      "ats": "greenhouse",
+      "slug": "fireworksai",
+      "source": "ai50"
+    },
+    {
+      "name": "Gamma",
+      "ats": "ashby",
+      "slug": "gamma",
+      "source": "ai50"
+    },
+    {
+      "name": "Genspark",
+      "ats": "external",
+      "slug": null,
+      "careers_url": "https://www.genspark.ai/careers",
+      "external_source": "wellfound",
+      "external_url": "https://wellfound.com/jobs?company=genspark",
+      "note": "Genspark hosts careers on gem.com which is auth-walled. Track via Wellfound; verify a few times per quarter.",
+      "source": "ai50"
+    },
+    {
+      "name": "Glean",
+      "ats": "greenhouse",
+      "slug": "gleanwork",
+      "source": "ai50"
+    },
+    {
+      "name": "Harvey AI",
+      "ats": "ashby",
+      "slug": "harvey",
+      "source": "ai50"
+    },
+    {
+      "name": "HeyGen",
+      "ats": "greenhouse",
+      "slug": "heygen",
+      "source": "ai50"
+    },
+    {
+      "name": "Krea",
+      "ats": "ashby",
+      "slug": "krea",
+      "source": "ai50"
+    },
+    {
+      "name": "Legora",
+      "ats": "ashby",
+      "slug": "legora",
+      "source": "ai50"
+    },
+    {
+      "name": "Listen Labs",
+      "ats": "ashby",
+      "slug": "listenlabs",
+      "source": "ai50"
+    },
+    {
+      "name": "Lovable",
+      "ats": "ashby",
+      "slug": "lovable",
+      "source": "ai50"
+    },
+    {
+      "name": "Mercor",
+      "ats": "ashby",
+      "slug": "mercor",
+      "source": "ai50"
+    },
+    {
+      "name": "Midjourney",
+      "ats": "static_roles",
+      "slug": null,
+      "careers_url": "https://www.midjourney.com/careers",
+      "note": "Midjourney does not post traditional job listings. They are always open to excellent engineers and researchers in the categories below. Surfaced once per profile change as low-confidence matches; not saved to the tracker.",
+      "static_roles": [
+        {
+          "id": "mj-ai-researcher",
+          "title": "AI Researcher",
+          "category": "Research",
+          "description": "Work on next-generation image, video, and world models. Train huge models, invent new techniques, work on a small team with massive impact."
+        },
+        {
+          "id": "mj-product-engineer-web",
+          "title": "Product Engineer (Web)",
+          "category": "Frontend",
+          "description": "Own the Midjourney web experience. Build the interfaces that millions of people use to create, explore, and organize their ideas."
+        },
+        {
+          "id": "mj-product-designer",
+          "title": "Product Designer",
+          "category": "Frontend",
+          "description": "Design the future of creative tools. Work on core web and mobile interfaces and secret hardware projects."
+        },
+        {
+          "id": "mj-data-engineer",
+          "title": "Data Engineer",
+          "category": "Frontend",
+          "description": "Consolidate data across systems, build interactive dashboards, serve as technical owner of the financial planning platform. Transform business questions into automated insights."
+        },
+        {
+          "id": "mj-gpu-infra-engineer",
+          "title": "GPU / Infrastructure Engineer",
+          "category": "Infrastructure",
+          "description": "Build and maintain supercomputers. GPU cluster orchestration, low-level kernel optimizations, next data center build-out."
+        },
+        {
+          "id": "mj-ml-data-engineer",
+          "title": "ML Data Engineer",
+          "category": "Infrastructure",
+          "description": "Build the pipelines that feed our models. Help collect, clean, and understand one of the most interesting datasets in the world."
+        },
+        {
+          "id": "mj-billing-infra-engineer",
+          "title": "Billing Infrastructure Engineer",
+          "category": "Infrastructure",
+          "description": "Own billing and payments infrastructure. Experimentation frameworks, payments integration, financial decision pipelines."
+        }
+      ],
+      "source": "ai50"
+    },
+    {
+      "name": "Mistral AI",
+      "ats": "ashby",
+      "slug": "mistral",
+      "source": "ai50"
+    },
+    {
+      "name": "Notion",
+      "ats": "ashby",
+      "slug": "notion",
+      "source": "ai50"
+    },
+    {
+      "name": "OpenAI",
+      "ats": "ashby",
+      "slug": "openai",
+      "source": "ai50"
+    },
+    {
+      "name": "OpenEvidence",
+      "ats": "ashby",
+      "slug": "openevidence",
+      "source": "ai50"
+    },
+    {
+      "name": "Perplexity",
+      "ats": "ashby",
+      "slug": "perplexity",
+      "source": "ai50"
+    },
+    {
+      "name": "Physical Intelligence",
+      "ats": "ashby",
+      "slug": "physicalintelligence",
+      "source": "ai50"
+    },
+    {
+      "name": "Reflection AI",
+      "ats": "ashby",
+      "slug": "reflectionai",
+      "source": "ai50"
+    },
+    {
+      "name": "Replit",
+      "ats": "ashby",
+      "slug": "replit",
+      "source": "ai50"
+    },
+    {
+      "name": "Rogo",
+      "ats": "ashby",
+      "slug": "rogo",
+      "source": "ai50"
+    },
+    {
+      "name": "Runway",
+      "ats": "ashby",
+      "slug": "runway",
+      "source": "ai50"
+    },
+    {
+      "name": "Safe Superintelligence",
+      "ats": "ashby",
+      "slug": "ssi",
+      "source": "ai50"
+    },
+    {
+      "name": "SambaNova",
+      "ats": "greenhouse",
+      "slug": "sambanovasystems",
+      "source": "ai50"
+    },
+    {
+      "name": "Sierra AI",
+      "ats": "ashby",
+      "slug": "sierra",
+      "source": "ai50"
+    },
+    {
+      "name": "Skild AI",
+      "ats": "greenhouse",
+      "slug": "skildai-careers",
+      "careers_url": "https://job-boards.greenhouse.io/skildai-careers",
+      "source": "ai50"
+    },
+    {
+      "name": "Speak",
+      "ats": "ashby",
+      "slug": "speak",
+      "source": "ai50"
+    },
+    {
+      "name": "Suno",
+      "ats": "ashby",
+      "slug": "suno",
+      "source": "ai50"
+    },
+    {
+      "name": "Surge AI",
+      "ats": "html_static",
+      "slug": null,
+      "careers_url": "https://surgehq.ai/careers",
+      "link_pattern": "^/?careers/[a-z0-9][a-z0-9-]+/?$",
+      "note": "Surge lists every role as /careers/<slug> on a static page; titles inferred from the link slug.",
+      "source": "ai50"
+    },
+    {
+      "name": "Synthesia",
+      "ats": "ashby",
+      "slug": "synthesia",
+      "source": "ai50"
+    },
+    {
+      "name": "Thinking Machines Lab",
+      "ats": "greenhouse",
+      "slug": "thinkingmachines",
+      "source": "ai50"
+    },
+    {
+      "name": "Together AI",
+      "ats": "greenhouse",
+      "slug": "togetherai",
+      "source": "ai50"
+    },
+    {
+      "name": "World Labs",
+      "ats": "ashby",
+      "slug": "worldlabs",
+      "source": "ai50"
+    }
+  ]
+}

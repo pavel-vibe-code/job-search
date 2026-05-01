@@ -1,0 +1,20 @@
+{
+  "_comment": "Notion property schema for the Job Tracker database. Used by setup wizard (Step 5b.1) to create the DB; ALSO used by run-job-search Step P-3 to recreate the DB if it goes missing. Keep this single source of truth — do NOT inline the schema as DDL pseudocode anywhere else (the previous version's wizard had it inline, which led to drift between setup and recreate paths).",
+
+  "Title":      {"title": {}},
+  "Company":    {"rich_text": {}},
+  "Score":      {"number": {}},
+  "Location":   {"rich_text": {}},
+  "Status":     {"select": {"options": [
+    {"name": "New",            "color": "blue"},
+    {"name": "Reviewed",       "color": "yellow"},
+    {"name": "Applied",        "color": "green"},
+    {"name": "Closed",         "color": "gray"},
+    {"name": "Not interested", "color": "red"}
+  ]}},
+  "URL":        {"url": {}},
+  "Department": {"rich_text": {}},
+  "Source":     {"rich_text": {}},
+  "Date Added": {"date": {}},
+  "Why Fits":   {"rich_text": {}}
+}

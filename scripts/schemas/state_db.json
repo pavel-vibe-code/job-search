@@ -1,0 +1,8 @@
+{
+  "_comment": "Notion property schema for the AI50 State database. Used by setup wizard (Step 5b.1) to create the DB; ALSO used by run-job-search Step P-3 to recreate the DB if it goes missing. Job IDs are stored in each row's PAGE BODY (as a fenced ```json code block), NOT as a property — this avoids Notion's 2000-char per-rich-text-block silent truncation. The 'Job count' number column is convenience for at-a-glance verification (and a tripwire for detecting truncated state).",
+
+  "Company key":  {"title": {}},
+  "Last checked": {"date": {}},
+  "Job count":    {"number": {}},
+  "Notes":        {"rich_text": {}}
+}
