@@ -441,13 +441,7 @@ claude --plugin-dir ./ai50-job-search-code
   - `NOTION_API_TOKEN=ntn_...` (your integration token)
   - `NOTION_PARENT_ANCHOR_ID=<32-char-page-id>` (optional but recommended) — a Notion page ID under which the plugin can recreate the entire hierarchy if `parent_page` ever goes missing. Without this, the Routine ABORTS on missing parent (since there's no human to ask for an anchor). Pick any page in your workspace where the plugin's integration has access; the plugin will create a child page named per `connectors.json[notion.names.parent_page]` if needed.
 - **Allowed domains:** `api.notion.com`, `*.ashbyhq.com`, `*.greenhouse.io`, `*.lever.co`, `*.comeet.com`, `surgehq.ai`
-- **Allowed permissions** (project `.claude/settings.json` — see README; can't be shipped with the plugin):
-  ```
-  Bash(python3 */scripts/notion-api.py *)
-  Bash(python3 */scripts/fetch-and-diff.py *)
-  Bash(python3 */scripts/validate-jobs.py *)
-  Bash(python3 */scripts/build-state-chunks.py *)
-  ```
+- **Permission allowlist** — shipped in `.claude/settings.json` at the repo root (committed since v2.3.1). The Routine clones it with the rest of the repo and applies it automatically. Bash patterns for plugin scripts + Read/Write/Edit rules for `state/`, `outputs/`, `/tmp/`, plus Read of `config/` and `scripts/schemas/`. See `.claude/settings.json` for the canonical list.
 - **Setup script** (Routine env config): create the sentinel + run an auth pre-check.
   ```bash
   NOTION_API=$(find / -path '*/scripts/notion-api.py' -type f 2>/dev/null | head -1)

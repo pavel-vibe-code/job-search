@@ -121,27 +121,17 @@ Edit the **AI 50 Profile** page in Notion directly. The profile is a JSON code b
 
 You must complete Path A first (the wizard creates the Notion structure on your laptop). Then:
 
-### B.1 Configure your project's permission allowlist
+### B.1 Permission allowlist (already shipped)
 
-Cloud Routines run unattended. Each Bash tool call needs to be pre-approved or the Routine stalls. Plugins **cannot** ship `.claude/settings.json` permissions (per Claude Code design); you add your own.
+Cloud Routines run unattended — each Bash, Read, Write, and Edit tool call must be pre-approved or the run stalls silently with no prompt to recover.
 
-Create or edit `.claude/settings.json` in your plugin's working directory:
+The repo ships **`.claude/settings.json`** at its root with the right allowlist (Bash patterns for the plugin's Python scripts, Read of config/state/schemas, Write/Edit of state/outputs/tmp). The Routine clones this with the rest of the repo and applies it automatically — **no action needed for Routine setup itself**.
 
-```json
-{
-  "permissions": {
-    "allow": [
-      "Bash(python3 */scripts/notion-api.py *)",
-      "Bash(python3 */scripts/fetch-and-diff.py *)",
-      "Bash(python3 */scripts/validate-jobs.py *)",
-      "Bash(python3 */scripts/build-state-chunks.py *)",
-      "Bash(python3 */scripts/validate-favorites.py *)"
-    ]
-  }
-}
-```
+For Path A (clone + `cd ai50-job-search` + `claude --plugin-dir .`), Claude Code reads the same `./.claude/settings.json` from your CWD, so local interactive runs are pre-approved too.
 
-The `*/scripts/<name>.py` wildcard matches both your local laptop path AND the Routine container path — `${CLAUDE_PLUGIN_ROOT}` does NOT expand inside `Bash()` permission patterns, so the wildcard is the portable form.
+If you install the plugin into a *different* project directory (e.g. via the marketplace once listed) so that your CWD is not the plugin repo, the shipped settings.json won't apply to that foreign session — copy the rules into your project's own `.claude/settings.json`.
+
+> **Why the wildcard form.** The Bash patterns use `*/scripts/<name>.py` rather than an absolute path. `${CLAUDE_PLUGIN_ROOT}` does **not** expand inside `Bash()` permission patterns, so the wildcard is the portable form that matches both your local laptop path and the Routine container path.
 
 ### B.2 Create a Routine environment
 

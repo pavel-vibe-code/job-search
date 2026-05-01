@@ -4,6 +4,35 @@ All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Chang
 
 ---
 
+## [2.3.1] — 2026-05-01
+
+### Ship `.claude/settings.json` for Routine support
+
+v2.3.0's CHANGELOG and INSTALL §B.1 stated that plugins "cannot ship `.claude/settings.json` permissions" and required users to write their own allowlist. That was based on a partial reading of Claude Code permissions — accurate for plugins installed into a *foreign* project directory, but wrong for the canonical Path A flow (clone + `cd` + `claude --plugin-dir .`) and for Cloud Routines (which clone the repo and apply its `.claude/settings.json` automatically — see [code.claude.com/docs/en/routines](https://code.claude.com/docs/en/routines.md)).
+
+- **New** — `.claude/settings.json` committed at the repo root with the canonical allowlist for the Routine execution path:
+  - `Bash(python3 */scripts/{notion-api,fetch-and-diff,validate-jobs,build-state-chunks}.py *)` — the four scripts the orchestrator + agents invoke at run time. `*/scripts/...` rather than an absolute path because `${CLAUDE_PLUGIN_ROOT}` does not expand inside `Bash()` permission patterns; wildcard is the portable form across local CWDs and Routine container paths.
+  - `Bash(mkdir -p *)`, `Bash(date *)` — shell utilities the orchestrator's setup scaffolding uses.
+  - `Read(**/config/**)`, `Read(**/state/**)`, `Read(**/scripts/schemas/**)`, `Read(/tmp/**)` — config files, state files, schema files, inter-pass scratch.
+  - `Write(**/state/**)`, `Write(**/outputs/**)`, `Write(/tmp/**)` — state DB, fallback markdown, scratch.
+  - `Edit(**/state/**)`, `Edit(**/outputs/**)`, `Edit(/tmp/**)` — same scopes for in-place edits.
+- **Updated** — `INSTALL.md` §B.1 reflects the shipped settings.json. Local Path A and Routine Path B both work without manual permission setup. Foreign-CWD installs (marketplace, not yet active) noted as the one case where users still copy rules into their own project's settings.json.
+- **Updated** — `skills/run-job-search/SKILL.md` § Routine setup — replaced the stale "can't be shipped with the plugin" note with a pointer to the committed `.claude/settings.json`.
+
+### What's NOT included
+
+- No `Bash(python3 */scripts/validate-favorites.py *)` — invoked only by the setup wizard skill, which Routines never run (sentinel skips it).
+- No `Bash(python3 */scripts/detect-notion-mcp.py *)` — same, setup-only.
+- No `WebFetch(domain:...)` rules — network egress to ATS/Notion happens inside the Python scripts via `urllib`, not via the WebFetch tool. Domain allowlisting is handled at the Routine UI's "Allowed domains" field (network layer), not at the Claude Code permissions layer.
+- No `mcp__*` rules — Routines run in `auth_method=api_token` mode (no Notion MCP). MCP tools are only used by the local `auth_method=mcp` path.
+- No `AskUserQuestion` — would prompt and break unattended execution.
+
+### Versions
+
+- Plugin: 2.3.0 → 2.3.1
+
+---
+
 ## [2.3.0] — 2026-04-30
 
 ### Architecture refactor — community-distribution-ready

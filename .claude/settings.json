@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 */scripts/notion-api.py *)",
+      "Bash(python3 */scripts/fetch-and-diff.py *)",
+      "Bash(python3 */scripts/validate-jobs.py *)",
+      "Bash(python3 */scripts/build-state-chunks.py *)",
+      "Bash(mkdir -p *)",
+      "Bash(date *)",
+      "Read(**/config/**)",
+      "Read(**/state/**)",
+      "Read(**/scripts/schemas/**)",
+      "Read(/tmp/**)",
+      "Write(**/state/**)",
+      "Write(**/outputs/**)",
+      "Write(/tmp/**)",
+      "Edit(**/state/**)",
+      "Edit(**/outputs/**)",
+      "Edit(/tmp/**)"
+    ]
+  }
+}
