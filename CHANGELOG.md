@@ -4,6 +4,61 @@ All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Chang
 
 ---
 
+## [2.4.0] — 2026-05-01
+
+### Project-scoped layout (skills auto-register in cloud Routines)
+
+First successful Cloud Routine fire (v2.3.4 environment) revealed the agent reporting `Unknown skill: run-job-search` and improvising the pipeline by reading `SKILL.md` as English prose. Root cause: Cloud Routines do not enable plugins from cloned repos — they only auto-discover skills at three locations: `~/.claude/skills/`, `.claude/skills/` (project-scoped), or a plugin's `skills/` directory **when the plugin is explicitly enabled**. v2.3.x shipped as a plugin (skills at `<repo>/skills/`), so cloud auto-discovery never registered them.
+
+This release moves to **project-scoped layout** — skills + agents live under `.claude/`, and the project's working directory IS the discovery root. Cloud Routines clone the repo, the agent runtime starts with cwd = repo root, and `.claude/skills/` registers automatically. Plugin manifest is dropped.
+
+- **Moved** — `skills/` → `.claude/skills/`, `agents/` → `.claude/agents/`. Standard project-scoped paths.
+- **Removed** — `.claude-plugin/plugin.json` and the entire `.claude-plugin/` directory. The repo is no longer a "plugin"; it's a project that ships skills + agents directly. Version tracking moves to git tags + CHANGELOG (no in-repo `version` field).
+- **Replaced** — `${CLAUDE_PLUGIN_ROOT}` references throughout `.claude/skills/*/SKILL.md`, `.claude/agents/*.md`, and `config/connectors.json`. Was undefined in cloud Routine context anyway (only set when plugin loads via `--plugin-dir`). Switched to relative paths (e.g. `./scripts/notion-api.py`) which work anywhere `cwd` is the repo root — both the cloud Routine container and a local `cd job-search && claude` session.
+
+### Personal config files removed from Git
+
+`config/profile.json` and `config/favorites.json` were tracked in Git, which v2.3.4's first Routine run revealed was a real leak vector — the cloud agent improvised by bootstrapping Notion from these local files instead of honoring the `abort_if_missing` policy. Even on a private repo, having user-curated content in git history is a hygiene problem; for any future public flip, it's a hard blocker.
+
+- **Untracked** — `git rm --cached config/profile.json config/favorites.json`. Files remain on disk; just no longer tracked.
+- **Added to `.gitignore`** — `config/profile.json` and `config/favorites.json`. Future wizard writes (in local mode) won't accidentally land in commit history.
+- **Architectural rule** — these files are EITHER absent (cloud mode, profile lives in Notion) OR locally-edited and gitignored (local mode). Never in Git, even as samples.
+
+### Install flow simplified
+
+The local install incantation drops `--plugin-dir`:
+
+```bash
+# v2.3.x and earlier
+git clone <url> && cd job-search && claude --plugin-dir .
+
+# v2.4.0
+git clone <url> && cd job-search && claude
+```
+
+The Routine UI's `Plugin` field — which we documented in §3.3 of v2.3.2 INSTALL.md — was always wishful thinking; the official Routines UI has no such field. Removed the row.
+
+### Versions
+
+- Plugin: 2.3.4 → 2.4.0 (minor bump — directory layout change is more than a bugfix)
+- Plugin manifest: removed; version now lives in git tags + this CHANGELOG only
+
+### Migration notes (v2.3.x → v2.4.0)
+
+If you have a v2.3.x clone:
+
+```bash
+cd /path/to/job-search
+git pull origin main
+# Skills+agents are now under .claude/
+# Your local config/profile.json + config/favorites.json (if any) survive — they're gitignored now
+# Re-open Claude Code from this directory: just `claude` (no --plugin-dir)
+```
+
+If you have a Cloud Routine running v2.3.x: nothing to do beyond the next fire — the Routine clones the latest `main` automatically and the new layout works.
+
+---
+
 ## [2.3.4] — 2026-05-01
 
 ### Setup script no longer attempts auth pre-check (can't work in pre-init context)

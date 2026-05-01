@@ -56,11 +56,13 @@ git remote -v
 
 ## 2. Install + Notion setup (same for both styles)
 
-### 2.1 — Load the plugin
+### 2.1 — Open Claude Code in the repo
 
 ```bash
-claude --plugin-dir .
+claude
 ```
+
+That's it. Run it from inside the cloned directory. The repo's `.claude/skills/` and `.claude/agents/` are auto-registered as project-scoped skills + agents — no `--plugin-dir` flag needed (this changed in v2.4.0; earlier versions shipped as a plugin via `--plugin-dir .`).
 
 ### 2.2 — Mint a Notion integration token
 
@@ -172,7 +174,7 @@ Cloud Routines run unattended — each Bash, Read, Write, and Edit tool call mus
 
 The repo ships **`.claude/settings.json`** at its root with the right allowlist (Bash patterns for the plugin's Python scripts, Read of `config`/`state`/`schemas`, Write/Edit of `state`/`outputs`/`tmp`). The Routine clones this with the rest of the repo and applies it automatically — **no action needed for Routine setup itself**.
 
-For local Path A (clone + `cd job-search` + `claude --plugin-dir .`), Claude Code reads the same `./.claude/settings.json` from your CWD, so local interactive runs are pre-approved too.
+For local interactive use (clone + `cd job-search` + `claude`), Claude Code reads the same `./.claude/settings.json` from your CWD, so local runs are pre-approved too.
 
 If you install the plugin into a *different* project directory (e.g. via the marketplace once listed) so that your CWD is not the plugin repo, the shipped settings.json won't apply to that foreign session — copy the rules into your project's own `.claude/settings.json`.
 
@@ -249,10 +251,11 @@ Go to **claude.ai/code → Routines → New Routine**.
 | Field | Value |
 |---|---|
 | **Repository** | Quick: `pavel-vibe-code/job-search`. Advanced: `<your-username>/job-search` (your fork). |
-| **Plugin** | `job-search` (the plugin name from `.claude-plugin/plugin.json`, not the repo name) |
 | **Environment** | The one you created in §3.2 |
 | **Schedule** | Weekly (e.g. Monday 08:00 your TZ) |
 | **Trigger / prompt** | (see below) |
+
+> Note: there is no separate "Plugin" field in the Routines UI. The Routine clones the repo and the project-scoped skills under `.claude/skills/` register automatically. This is why v2.4.0 dropped the plugin manifest — Routines don't enable plugins, but they do auto-discover project-scoped skills.
 
 > **Tip — CLI alternative.** You can create the Routine from inside Claude Code instead of the web UI: run `/schedule` and walk through the prompts. It hits the same backend as the web form, so the resulting Routine appears at claude.ai/code/routines just the same. Useful when you want to script Routine creation alongside other terminal work; the web UI is more transparent for first-time setup. If `/schedule` reports your account isn't connected to GitHub, run `/web-setup` first.
 

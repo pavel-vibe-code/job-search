@@ -40,10 +40,10 @@ Notion calls go through MCP tools. The resolved prefix is in `connectors.json[no
 
 **If `auth_method == "api_token"`:**
 
-Notion calls go through Bash invocations of `${CLAUDE_PLUGIN_ROOT}/scripts/notion-api.py`. The only operation you need:
+Notion calls go through Bash invocations of `./scripts/notion-api.py`. The only operation you need:
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/notion-api.py create-pages \
+python3 ./scripts/notion-api.py create-pages \
   --pages /tmp/digest.json \
   --parent-id <hot_list_parent_page_id> \
   --parent-type page
@@ -104,14 +104,14 @@ The orchestrator passes the following into your prompt:
 - **Hot-list parent page ID** (resolved by run-job-search Step P-3 from `state/cached-ids.json`)
 - **Newly-written jobs** — `/tmp/newly-written.json`
 - **Static notifications + external companies** — from Pass 1
-- **Profile path** — `/tmp/profile.json` (cloud) or `${CLAUDE_PLUGIN_ROOT}/config/profile.json` (local)
+- **Profile path** — `/tmp/profile.json` (cloud) or `./config/profile.json` (local)
 
 Read profile JSON for:
 - `scoring.hot_score_threshold` — minimum score for "hot" classification
 - `scoring.max_score` — for the "{score}/{max}" display format
 - `scoring.minimum_score` — for context
 
-Read `${CLAUDE_PLUGIN_ROOT}/config/connectors.json` only for:
+Read `./config/connectors.json` only for:
 - `connector_type` (always `"notion"` in production runs)
 - `notion.auth_method` and `notion.mcp_tool_prefix` (only if mcp)
 - `markdown.output_folder` and `markdown.hotlist_fallback_filename` — ONLY referenced if the orchestrator explicitly invokes a markdown fallback path (which this agent does not initiate; see Step 4 + Failure contract)

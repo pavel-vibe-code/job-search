@@ -16,15 +16,15 @@ Orchestrate the AI 50 job search pipeline. Designed for **Claude Code Routines**
 
 State storage:
 - **Notion state DB** (required for Routines, recommended even locally) — schema in `agents/compile-write.md`. State persists in the cloud and survives re-deploys.
-- **Local file** (fallback if state DB not created during setup) — state lives at `${CLAUDE_PLUGIN_ROOT}/state/companies.json`. Suitable for laptop use only; Routine cold-starts wipe it.
+- **Local file** (fallback if state DB not created during setup) — state lives at `./state/companies.json`. Suitable for laptop use only; Routine cold-starts wipe it.
 
-Per-user IDs are NOT in the repo. They live in `${CLAUDE_PLUGIN_ROOT}/state/cached-ids.json` (gitignored). The runtime resolves them via `notion-api.py discover` on every run — fast on cache hit, self-healing on cache miss.
+Per-user IDs are NOT in the repo. They live in `./state/cached-ids.json` (gitignored). The runtime resolves them via `notion-api.py discover` on every run — fast on cache hit, self-healing on cache miss.
 
 ## Pre-flight
 
 ### Step P-0 — Setup check
 
-Look for `${CLAUDE_PLUGIN_ROOT}/state/.setup_complete`.
+Look for `./state/.setup_complete`.
 
 If it does **not** exist, this is a first run. Print:
 
@@ -32,7 +32,7 @@ If it does **not** exist, this is a first run. Print:
 Welcome to AI 50 Job Search! Before the first search, we need to configure your profile.
 ```
 
-Immediately execute the full setup wizard at `${CLAUDE_PLUGIN_ROOT}/skills/setup/SKILL.md`. The wizard handles deployment-mode choice, profile collection, scoring, Notion auth, and creates the sentinel + cached-ids.json on completion.
+Immediately execute the full setup wizard at `./skills/setup/SKILL.md`. The wizard handles deployment-mode choice, profile collection, scoring, Notion auth, and creates the sentinel + cached-ids.json on completion.
 
 If setup is abandoned mid-way (no sentinel created), stop and tell the user: *"Setup incomplete. Type 'run the job search' to try again, or 'run onboarding' to launch the wizard directly."*
 
@@ -40,9 +40,9 @@ In a **Cloud Routine** the sentinel is reset on every cold start; the Routine se
 
 ### Step P-1 — Confirm config files exist
 
-1. Confirm `${CLAUDE_PLUGIN_ROOT}/config/connectors.json` and `companies.json` exist and parse as valid JSON. (`profile.json` and `favorites.json` may be local-only — they're hydrated from Notion in cloud mode, see P-3.)
+1. Confirm `./config/connectors.json` and `companies.json` exist and parse as valid JSON. (`profile.json` and `favorites.json` may be local-only — they're hydrated from Notion in cloud mode, see P-3.)
 2. Read `connectors.json[connector_type]`. For Routine compatibility this should be `"notion"` (markdown is fallback only).
-3. Read `${CLAUDE_PLUGIN_ROOT}/state/.setup_complete` to determine `deployment_mode` (cloud / local) and `auth_method` (mcp / api_token).
+3. Read `./state/.setup_complete` to determine `deployment_mode` (cloud / local) and `auth_method` (mcp / api_token).
 
 ### Step P-2 — MCP prefix re-probe (auth_method == "mcp" only)
 
@@ -58,9 +58,9 @@ Skip this step entirely if `auth_method == "api_token"`.
 The plugin's 6 Notion artifacts (parent page, tracker DB, hot-list page, state DB, profile page, favorites page) need their IDs resolved before the pipeline can run. We use a 3-tier approach: cache → discover-by-name → recreate.
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/notion-api.py discover \
-  --config     ${CLAUDE_PLUGIN_ROOT}/config/connectors.json \
-  --cache-file ${CLAUDE_PLUGIN_ROOT}/state/cached-ids.json
+python3 ./scripts/notion-api.py discover \
+  --config     ./config/connectors.json \
+  --cache-file ./state/cached-ids.json
 ```
 
 The script returns JSON with one entry per artifact. Each entry has:
@@ -85,19 +85,19 @@ The script returns JSON with one entry per artifact. Each entry has:
    - **In a Routine** (no human, no `NOTION_PARENT_ANCHOR_ID`): ABORT with the error: *"Parent page missing and no NOTION_PARENT_ANCHOR_ID configured for non-interactive recreation. Set the env var to a known anchor page ID, or re-run setup interactively."*
    - **In any context with `NOTION_PARENT_ANCHOR_ID` set**: recreate the parent page under that anchor.
 
-3. **Recreate** using `notion-api.py` with the canonical JSON schemas at `${CLAUDE_PLUGIN_ROOT}/scripts/schemas/`:
+3. **Recreate** using `notion-api.py` with the canonical JSON schemas at `./scripts/schemas/`:
    ```bash
    # tracker_db
-   python3 ${CLAUDE_PLUGIN_ROOT}/scripts/notion-api.py create-database \
+   python3 ./scripts/notion-api.py create-database \
      --parent-page-id <parent_id> \
      --title          "<connectors.json[notion.names.tracker_db]>" \
-     --schema         ${CLAUDE_PLUGIN_ROOT}/scripts/schemas/tracker_db.json
+     --schema         ./scripts/schemas/tracker_db.json
 
    # state_db
-   python3 ${CLAUDE_PLUGIN_ROOT}/scripts/notion-api.py create-database \
+   python3 ./scripts/notion-api.py create-database \
      --parent-page-id <parent_id> \
      --title          "<connectors.json[notion.names.state_db]>" \
-     --schema         ${CLAUDE_PLUGIN_ROOT}/scripts/schemas/state_db.json
+     --schema         ./scripts/schemas/state_db.json
 
    # parent_page or hot_list_page (no schema; just create as a page)
    #   prepare a 1-element JSON array [{"properties": {"title": "<name>"}, "content": "..."}]
@@ -137,13 +137,13 @@ All page/DB IDs in this section come from `state/cached-ids.json` (resolved in S
 If parsing fails (page edited to invalid JSON, missing code block), abort with:
 > "Profile page in Notion does not contain valid JSON. Edit the page (notion.so/{profile_page_id}) and try again. The page body must contain a single ```json code block holding the full profile."
 
-**Local mode:** no action needed — agents read `${CLAUDE_PLUGIN_ROOT}/config/profile.json` directly.
+**Local mode:** no action needed — agents read `./config/profile.json` directly.
 
 #### Favorites
 
 **Cloud mode:** fetch the page at `cached-ids.favorites_page_id`, extract the JSON code block (array of favorite-company objects), write to `/tmp/favorites.json`. If the array is empty, write `[]`.
 
-**Local mode:** no action needed — scripts read `${CLAUDE_PLUGIN_ROOT}/config/favorites.json` directly.
+**Local mode:** no action needed — scripts read `./config/favorites.json` directly.
 
 #### State
 
@@ -167,7 +167,7 @@ Read `connectors.json[notion.auth_method]` to decide.
 Read `cached-ids.tracker_state_database_id`. One Bash call does the entire hydration in parallel:
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/notion-api.py hydrate-state \
+python3 ./scripts/notion-api.py hydrate-state \
   --database-id <tracker_state_database_id from cached-ids.json> \
   --output      /tmp/ai50-state.json \
   --max-workers 10
@@ -200,7 +200,7 @@ Title/url for *removed* jobs is unavailable when the state-DB backend is in use 
 
 Write to `/tmp/ai50-state.json`. If empty database, write `{}`.
 
-**Local mode:** copy `${CLAUDE_PLUGIN_ROOT}/state/companies.json` to `/tmp/ai50-state.json` (or write `{}` if missing).
+**Local mode:** copy `./state/companies.json` to `/tmp/ai50-state.json` (or write `{}` if missing).
 
 ## Pipeline
 
@@ -243,7 +243,7 @@ Inputs to pass:
   - Removed jobs:         from Pass 1
   - Tracker DB ID:        <cached-ids.tracker_database_id>
   - Profile path:         /tmp/profile.json (cloud mode) or config/profile.json (local)
-  - Connectors path:      ${CLAUDE_PLUGIN_ROOT}/config/connectors.json
+  - Connectors path:      ./config/connectors.json
 ```
 
 Prompt:
@@ -286,7 +286,7 @@ Prompt:
 
 4. **Append "## Closed jobs not yet marked"** listing `removed_jobs_pending` IDs (or "none" if empty).
 
-5. **Write** to `${CLAUDE_PLUGIN_ROOT}/outputs/<YYYY-MM-DD>-tracker-fallback.md`. On same-day re-runs (file exists), suffix with `-2`, `-3`, …; never overwrite a previous fallback file.
+5. **Write** to `./outputs/<YYYY-MM-DD>-tracker-fallback.md`. On same-day re-runs (file exists), suffix with `-2`, `-3`, …; never overwrite a previous fallback file.
 
 6. **Surface loud warning** in the final run summary: *"⚠️  Notion tracker writes failed — N jobs saved to outputs/<date>-tracker-fallback.md. Error: \<code\> / \<detail\>. Failed IDs unmarked from state — next run will retry. If `removed_jobs_pending` is non-empty: M close-marks pending; investigate."*
 
@@ -307,7 +307,7 @@ Read `/tmp/ai50-state.json`.
 Run the helper to convert `/tmp/ai50-state.json` into small per-chunk payload files. Default chunk size is 5; pages have no 2000-char body limit but the *MCP tool result* echoes the page properties for every created row, so smaller chunks keep agent transcripts manageable.
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/build-state-chunks.py \
+python3 ./scripts/build-state-chunks.py \
   --state-file /tmp/ai50-state.json \
   --output-dir  /tmp/state-chunks \
   --chunk-size  5 \
@@ -350,7 +350,7 @@ Pick 3 random rows across the chunks (vary chunk index and row count — include
 Mismatch = silent truncation; abort the run with a clear error citing the failing key + counts.
 
 **Else (local file backend):**
-- Copy `/tmp/ai50-state.json` back to `${CLAUDE_PLUGIN_ROOT}/state/companies.json`.
+- Copy `/tmp/ai50-state.json` back to `./state/companies.json`.
 
 Note: profile and favorites are **read-only** during a run, even in cloud mode. The user updates them by editing the Notion pages directly between runs. Do not write profile/favorites back to Notion in any pass.
 
@@ -377,7 +377,7 @@ If newly written jobs list is empty AND no static notifications AND no external 
 **Failure handling — markdown fallback contract:** if notify-hot's response contains `{"error": ..., "fallback_file": "/tmp/notify-hot-failed.json"}` (see `agents/notify-hot.md` § Failure contract):
 
 1. Read `/tmp/notify-hot-failed.json`. Verify `schema_version == 1`; on unknown version, treat as `agent_crashed_no_response` and skip step 2.
-2. Write `digest.body_markdown` verbatim to `${CLAUDE_PLUGIN_ROOT}/outputs/<YYYY-MM-DD>-hotlist-fallback.md`. On same-day re-runs (file exists), suffix with `-2`, `-3`, … — never overwrite a previous fallback.
+2. Write `digest.body_markdown` verbatim to `./outputs/<YYYY-MM-DD>-hotlist-fallback.md`. On same-day re-runs (file exists), suffix with `-2`, `-3`, … — never overwrite a previous fallback.
 3. Surface a loud warning in the final run summary: *"⚠️  Hot-list page creation failed — digest saved to outputs/<date>-hotlist-fallback.md. Error: <code> / <detail>. Investigate before next run."*
 
 **Malformed / missing notify-hot response:** treat as `agent_crashed_no_response`. The hot-list digest for this run is lost (no markdown to write), but the run continues — notify-hot doesn't mutate state, so there's nothing to un-poison. Surface a P0 warning in the run summary.

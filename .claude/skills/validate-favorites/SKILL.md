@@ -17,7 +17,7 @@ offer to fix any issues in place.
 ## Step 1 — Run the validator
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/validate-favorites.py --plugin-root ${CLAUDE_PLUGIN_ROOT}
+python3 ./scripts/validate-favorites.py --plugin-root .
 ```
 
 ## Step 2 — Present results

@@ -41,7 +41,7 @@
 
   "markdown": {
     "_comment": "Fallback only. NOT a user-selectable connector. The orchestrator writes here if Notion writes fail repeatedly during a run, so results aren't lost.",
-    "output_folder": "${CLAUDE_PLUGIN_ROOT}/outputs/",
+    "output_folder": "./outputs/",
     "tracker_fallback_filename":  "{date}-tracker-fallback.md",
     "hotlist_fallback_filename":  "{date}-hotlist-fallback.md"
   }

@@ -15,7 +15,7 @@ Interactive setup wizard. Collects profile, ranking logic, additional context, a
 
 ## Step 0 — Check if already configured
 
-Check for `${CLAUDE_PLUGIN_ROOT}/state/.setup_complete`.
+Check for `./state/.setup_complete`.
 
 If it exists and this skill was **explicitly triggered by the user** (not auto-invoked from run-job-search), print:
 
@@ -333,7 +333,7 @@ will return "object_not_found".
 
 Ask the user to paste the token. Once received:
 
-1. **Validate** by calling `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/notion-api.py users-me --token <pasted>`. If exit 0 with `ok: true` and a workspace name → token is valid. If exit 2 → token is invalid; ask them to re-paste.
+1. **Validate** by calling `python3 ./scripts/notion-api.py users-me --token <pasted>`. If exit 0 with `ok: true` and a workspace name → token is valid. If exit 2 → token is invalid; ask them to re-paste.
 2. **Persist**:
    - Write the token to `~/.config/ai50-job-search/notion-token`. `chmod 0600`.
    - Set `connectors.notion.api_token_file = "~/.config/ai50-job-search/notion-token"`.
@@ -367,7 +367,7 @@ Skip 5a.2 if this step succeeds.
 Run the detector script:
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/detect-notion-mcp.py
+python3 ./scripts/detect-notion-mcp.py
 ```
 
 Returns JSON: `{"detected": bool, "name": "...", "prefix": "...", "install_method": "cli"|"connector", ...}`. Exit 0 = found, 1 = not found, 2 = `claude` CLI itself unavailable.
@@ -428,7 +428,7 @@ If the user selected "Cloud Routine" deployment mode in Step 1 AND chose `auth_m
 
 ##### Step 5b.0 — Confirm artifact names
 
-Read the default names from `${CLAUDE_PLUGIN_ROOT}/config/connectors.json[notion.names]`. Defaults:
+Read the default names from `./config/connectors.json[notion.names]`. Defaults:
 
 | Key | Default name |
 |---|---|
@@ -474,20 +474,20 @@ If they pick (c) — **Create artifacts automatically:**
 
 1. Search Notion for an existing page using `notion-search` (any page the user wants to nest the AI 50 setup under). Show the top 3 candidates and ask which one to use, or let them paste an ID. As a last resort, fall back to a workspace-level page (some Notion API setups disallow this — handle the 400 error gracefully and re-ask).
 2. Create the parent page using the configured name (`names.parent_page`) under the chosen anchor.
-3. Create the Job Tracker database (named `names.tracker_db`) under the parent page using the schema at `${CLAUDE_PLUGIN_ROOT}/scripts/schemas/tracker_db.json`:
+3. Create the Job Tracker database (named `names.tracker_db`) under the parent page using the schema at `./scripts/schemas/tracker_db.json`:
    ```bash
-   python3 ${CLAUDE_PLUGIN_ROOT}/scripts/notion-api.py create-database \
+   python3 ./scripts/notion-api.py create-database \
      --parent-page-id <parent_page_id> \
      --title          "<names.tracker_db>" \
-     --schema         ${CLAUDE_PLUGIN_ROOT}/scripts/schemas/tracker_db.json
+     --schema         ./scripts/schemas/tracker_db.json
    ```
 4. Create the Hot Lists page (named `names.hot_list_page`) under the parent page.
-5. Create the State database (named `names.state_db`) under the parent page using the schema at `${CLAUDE_PLUGIN_ROOT}/scripts/schemas/state_db.json`:
+5. Create the State database (named `names.state_db`) under the parent page using the schema at `./scripts/schemas/state_db.json`:
    ```bash
-   python3 ${CLAUDE_PLUGIN_ROOT}/scripts/notion-api.py create-database \
+   python3 ./scripts/notion-api.py create-database \
      --parent-page-id <parent_page_id> \
      --title          "<names.state_db>" \
-     --schema         ${CLAUDE_PLUGIN_ROOT}/scripts/schemas/state_db.json
+     --schema         ./scripts/schemas/state_db.json
    ```
    **Important:** Job IDs are stored in each row's **page body** as a fenced ```json code block, not as a property. This avoids Notion's 2000-char per-rich-text-block silent truncation. The `Job count` number column is a convenience for at-a-glance verification (and a tripwire — `Job count` should equal the length of the JSON array in the body).
 
@@ -500,7 +500,7 @@ If they pick (c) — **Create artifacts automatically:**
    - Create page named `names.favorites_page` under the parent. Body: a single ```json code block containing the favorites array (default `[]` if user doesn't add any in Step 7).
    - Both pages will be edited by the user later via Notion directly. The plugin reads them on every run; it never writes back. **They are NEVER auto-recreated by the runtime** — if they're accidentally deleted, the user must re-run setup.
 
-7. Capture all IDs and write them to `${CLAUDE_PLUGIN_ROOT}/state/cached-ids.json` (Step 6 below). The repo's `connectors.json` does NOT receive these IDs — IDs are per-user, not per-plugin.
+7. Capture all IDs and write them to `./state/cached-ids.json` (Step 6 below). The repo's `connectors.json` does NOT receive these IDs — IDs are per-user, not per-plugin.
 
 If they pick (e) — **Paste existing IDs:**
 
@@ -609,7 +609,7 @@ Build `profile.json` from all collected answers:
 }
 ```
 
-**In local mode:** write the assembled `profile.json` to `${CLAUDE_PLUGIN_ROOT}/config/profile.json`. Leave `config/favorites.json` for Step 7.
+**In local mode:** write the assembled `profile.json` to `./config/profile.json`. Leave `config/favorites.json` for Step 7.
 
 **In cloud mode:** do **not** write `config/profile.json`. Instead:
 - Use `notion-update-page` (replace_content) to set the body of the AI 50 Profile page (created in Step 5b) to a single ```json code block containing the assembled profile JSON.
@@ -650,10 +650,10 @@ This file is `.gitignore`d — it's per-user state, not part of the plugin. The 
 **Create sentinel:**
 
 ```bash
-mkdir -p "${CLAUDE_PLUGIN_ROOT}/state"
+mkdir -p "./state"
 printf '{"setup_completed":"%s","method":"guided","deployment_mode":"%s","auth_method":"%s"}\n' \
   "$(date +%Y-%m-%d)" "{cloud|local}" "{mcp|api_token}" \
-  > "${CLAUDE_PLUGIN_ROOT}/state/.setup_complete"
+  > "./state/.setup_complete"
 ```
 
 (The wizard substitutes `{cloud|local}` and `{mcp|api_token}` with the actual values from Step 1 / Step 5 before running this. The date comes from `date +%Y-%m-%d` at sentinel-write time, NOT a literal placeholder.)
@@ -675,7 +675,7 @@ Type company names separated by commas, or press Enter to skip.
 
 If they provide companies: for each one, run the ATS detection flow from validate-favorites — fetch the careers page, detect platform, build a favorite-company object.
 
-**Local mode:** write the resulting array to `${CLAUDE_PLUGIN_ROOT}/config/favorites.json` (replacing samples).
+**Local mode:** write the resulting array to `./config/favorites.json` (replacing samples).
 
 **Cloud mode:** use `notion-update-page` (replace_content) to set the body of the AI 50 Favorites page to a single ```json code block containing the array. Leave `config/favorites.json` as the shipped template.
 

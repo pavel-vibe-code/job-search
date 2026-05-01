@@ -42,7 +42,7 @@ You may NOT use any other notion-* MCP tool, even if available.
 
 **If `auth_method == "api_token"`:**
 
-Notion calls go through Bash invocations of `${CLAUDE_PLUGIN_ROOT}/scripts/notion-api.py`. Operations:
+Notion calls go through Bash invocations of `./scripts/notion-api.py`. Operations:
 
 | Conceptual op | API command |
 |---|---|
@@ -119,8 +119,8 @@ Fields:
 
 The orchestrator passes the following into your prompt:
 - **Tracker DB ID** (resolved by run-job-search Step P-3 from `state/cached-ids.json`)
-- **Profile path** — `/tmp/profile.json` (cloud mode) or `${CLAUDE_PLUGIN_ROOT}/config/profile.json` (local mode)
-- **Connectors path** — `${CLAUDE_PLUGIN_ROOT}/config/connectors.json` (read auth_method + mcp_tool_prefix)
+- **Profile path** — `/tmp/profile.json` (cloud mode) or `./config/profile.json` (local mode)
+- **Connectors path** — `./config/connectors.json` (read auth_method + mcp_tool_prefix)
 - **Candidates file** — `/tmp/pass3-input.json`
 - **Removed jobs** — array (may be empty)
 

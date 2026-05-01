@@ -41,9 +41,9 @@ If the input file is empty (`[]`) or missing, return immediately with empty arra
 Run the helper script. It groups candidates by `(ats, slug)`, makes one API call per group (parallelised), and tests each candidate's ID against the active set returned by the API:
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/validate-jobs.py \
+python3 ./scripts/validate-jobs.py \
   --candidates <orchestrator-supplied-path> \
-  --plugin-root ${CLAUDE_PLUGIN_ROOT} \
+  --plugin-root . \
   --output /tmp/validate-output.json
 ```
 

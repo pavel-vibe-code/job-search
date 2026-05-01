@@ -3,6 +3,11 @@ state/cached-ids.json
 state/companies.json
 state/.setup_complete
 
+# Per-user config — written by setup wizard or user edits, never committed.
+# Authoritative source-of-truth lives in Notion (cloud mode) or here (local mode).
+config/profile.json
+config/favorites.json
+
 # Claude Code per-project settings (user adds their own)
 .claude/settings.local.json
 

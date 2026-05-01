@@ -29,7 +29,7 @@ Using `haiku` model — this agent does minimal reasoning; most work is done by 
 Execute the fetch-and-diff script **exactly once**, using the flags the orchestrator passed in the prompt (typically `--state-file /tmp/ai50-state.json`, plus `--profile-file` / `--favorites-file` in cloud mode):
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/fetch-and-diff.py --plugin-root ${CLAUDE_PLUGIN_ROOT} --state-file <orchestrator-supplied-path>
+python3 ./scripts/fetch-and-diff.py --plugin-root . --state-file <orchestrator-supplied-path>
 ```
 
 If the orchestrator did not pass any flags, fall back to the script's defaults — but never invent your own flags.
@@ -42,7 +42,7 @@ Capture the JSON output to a file (e.g. `/tmp/fetch-and-diff-output.json`). If t
 
 ## Step 2 — Read the profile filters
 
-Read `${CLAUDE_PLUGIN_ROOT}/config/profile.json`. Extract:
+Read `./config/profile.json`. Extract:
 - `role_types[].search_keywords` — terms to match against job titles
 - `location_rules` — eligible modes (remote/hybrid) and excluded cities/countries
 - `exclusion_rules` — hard filters
