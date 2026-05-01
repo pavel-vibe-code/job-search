@@ -4,6 +4,21 @@ All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Chang
 
 ---
 
+## [2.3.3] — 2026-05-01
+
+### Setup script fix — backslash line-continuation breaks in Routine UI
+
+First test-fire of the Cloud Routine failed with exit 127 ("command not found: 2026-05-01"). Diagnosis: the setup script's `printf ... \` continuation line in the Routine UI's text-input field had its trailing backslash stripped, causing bash to treat the date-substitution line as its own command.
+
+- **Fixed** — `INSTALL.md` §3.2c and `skills/run-job-search/SKILL.md` setup script: extracted `DATE=$(date +%Y-%m-%d)` to its own line; collapsed the `printf` to a single line (no `\` continuation). Behaviour identical when it works; reliable in web text inputs.
+- **New** — explanatory note in INSTALL.md §3.2c about why backslash continuations are fragile in routine setup scripts (web inputs may normalize whitespace / line endings). Same advice applies to any user customisations.
+
+### Versions
+
+- Plugin: 2.3.2 → 2.3.3
+
+---
+
 ## [2.3.2] — 2026-05-01
 
 ### Two-persona INSTALL flow + Routine-clone concept doc

@@ -228,14 +228,11 @@ PLUGIN_ROOT=$(dirname "$(dirname "$NOTION_API")")
 
 # Create the setup sentinel so run-job-search doesn't trigger the wizard
 mkdir -p "$PLUGIN_ROOT/state"
-printf '{"setup_completed":"%s","method":"routine","deployment_mode":"cloud","auth_method":"api_token"}\n' \
-  "$(date +%Y-%m-%d)" > "$PLUGIN_ROOT/state/.setup_complete"
+DATE=$(date +%Y-%m-%d)
+printf '{"setup_completed":"%s","method":"routine","deployment_mode":"cloud","auth_method":"api_token"}\n' "$DATE" > "$PLUGIN_ROOT/state/.setup_complete"
 
 # Auth pre-check — fail fast if the token is wrong
-python3 "$NOTION_API" users-me >/dev/null || {
-  echo "ERROR: NOTION_API_TOKEN invalid" >&2
-  exit 1
-}
+python3 "$NOTION_API" users-me >/dev/null || { echo "ERROR: NOTION_API_TOKEN invalid" >&2; exit 1; }
 echo "Setup OK; plugin root: $PLUGIN_ROOT"
 ```
 
@@ -243,6 +240,8 @@ This runs once per Routine fire, before the agent starts. It:
 1. Discovers where the plugin lives in the container.
 2. Creates `state/.setup_complete` (the wizard would create this on a normal install; Routine containers don't persist files between runs).
 3. Verifies the Notion token works.
+
+> **Why no backslash line-continuations.** Earlier versions of this doc used `printf ... \` followed by a continuation line for the date. Web text inputs (including the Routine UI's setup-script field) sometimes strip trailing whitespace or normalize line endings in ways that break `\`-continuation, leaving you with a script that runs the second line as its own command. Extracting `DATE=$(date ...)` to its own line avoids the issue entirely. Same logic applies if you tweak the script: keep each shell statement on a single line.
 
 ### 3.3 — Create the Routine
 

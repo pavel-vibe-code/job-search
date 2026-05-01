@@ -447,7 +447,8 @@ claude --plugin-dir ./job-search
   NOTION_API=$(find / -path '*/scripts/notion-api.py' -type f 2>/dev/null | head -1)
   PLUGIN_ROOT=$(dirname "$(dirname "$NOTION_API")")
   mkdir -p "$PLUGIN_ROOT/state"
-  printf '{"setup_completed":"%s","method":"routine","deployment_mode":"cloud","auth_method":"api_token"}\n' "$(date +%Y-%m-%d)" > "$PLUGIN_ROOT/state/.setup_complete"
+  DATE=$(date +%Y-%m-%d)
+  printf '{"setup_completed":"%s","method":"routine","deployment_mode":"cloud","auth_method":"api_token"}\n' "$DATE" > "$PLUGIN_ROOT/state/.setup_complete"
   python3 "$NOTION_API" users-me >/dev/null || { echo "ERROR: NOTION_API_TOKEN invalid" >&2; exit 1; }
   ```
 
