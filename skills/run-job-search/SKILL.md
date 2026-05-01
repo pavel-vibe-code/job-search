@@ -449,8 +449,9 @@ claude --plugin-dir ./job-search
   mkdir -p "$PLUGIN_ROOT/state"
   DATE=$(date +%Y-%m-%d)
   printf '{"setup_completed":"%s","method":"routine","deployment_mode":"cloud","auth_method":"api_token"}\n' "$DATE" > "$PLUGIN_ROOT/state/.setup_complete"
-  python3 "$NOTION_API" users-me >/dev/null || { echo "ERROR: NOTION_API_TOKEN invalid" >&2; exit 1; }
+  echo "Setup OK; plugin root: $PLUGIN_ROOT"
   ```
+  No auth pre-check here — the setup-script context can't see custom env vars (Routine quirk; see INSTALL.md §3.2c). Auth fails loudly at the orchestrator's first Notion call instead.
 
 **Routine prompt:**
 ```

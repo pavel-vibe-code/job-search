@@ -155,9 +155,9 @@ Once §2 is done, you can schedule weekly unattended runs.
 A Cloud Routine is a sandboxed container that fires on your schedule (e.g. every Monday 08:00). Each run:
 
 1. **Clones your repo from GitHub.** Whatever's on `main` at fire time gets pulled fresh into a new container. Code changes you push land in the next run automatically; no other "deploy" step.
-2. **Runs your setup script** (§3.2c) which recreates the `state/.setup_complete` sentinel and verifies the Notion token. Containers don't persist between runs, so this scaffolds fresh state each fire.
-3. **Loads your environment** — env vars (`NOTION_API_TOKEN`, `NOTION_PARENT_ANCHOR_ID`) and the network egress allowlist.
-4. **Executes the trigger prompt** — runs the `run-job-search` orchestrator skill end-to-end with no human in the loop.
+2. **Runs your setup script** (§3.2c) which scaffolds `state/.setup_complete` so the orchestrator skips the wizard. Containers don't persist between runs, so this scaffolds fresh state each fire.
+3. **Loads the agent runtime + your environment.** This is when your custom env vars (`NOTION_API_TOKEN`, `NOTION_PARENT_ANCHOR_ID`) and the network egress allowlist become visible. **Setup script does NOT have access to your custom env vars** — it runs in a constrained pre-init context. Don't try to do auth pre-checks or anything that needs your token from inside the setup script.
+4. **Executes the trigger prompt** — runs the `run-job-search` orchestrator skill end-to-end with no human in the loop. Auth failures (wrong token, revoked integration) surface here at the first Notion call.
 5. **Tears down.** Nothing persists outside Notion.
 
 The repo's `.claude/settings.json` (shipped since v2.3.1) supplies the tool-permission allowlist; without it the Routine would silently stall on the first Bash call. You don't have to write or edit it.
@@ -231,17 +231,16 @@ mkdir -p "$PLUGIN_ROOT/state"
 DATE=$(date +%Y-%m-%d)
 printf '{"setup_completed":"%s","method":"routine","deployment_mode":"cloud","auth_method":"api_token"}\n' "$DATE" > "$PLUGIN_ROOT/state/.setup_complete"
 
-# Auth pre-check — fail fast if the token is wrong
-python3 "$NOTION_API" users-me >/dev/null || { echo "ERROR: NOTION_API_TOKEN invalid" >&2; exit 1; }
 echo "Setup OK; plugin root: $PLUGIN_ROOT"
 ```
 
 This runs once per Routine fire, before the agent starts. It:
 1. Discovers where the plugin lives in the container.
 2. Creates `state/.setup_complete` (the wizard would create this on a normal install; Routine containers don't persist files between runs).
-3. Verifies the Notion token works.
 
-> **Why no backslash line-continuations.** Earlier versions of this doc used `printf ... \` followed by a continuation line for the date. Web text inputs (including the Routine UI's setup-script field) sometimes strip trailing whitespace or normalize line endings in ways that break `\`-continuation, leaving you with a script that runs the second line as its own command. Extracting `DATE=$(date ...)` to its own line avoids the issue entirely. Same logic applies if you tweak the script: keep each shell statement on a single line.
+> **Why no auth pre-check in the setup script.** Earlier versions ran `python3 "$NOTION_API" users-me` here as a fail-fast check. That was wrong: the Routine's setup-script context **does not see custom environment variables** (it runs in a constrained pre-init context with only Claude-cloud and system vars). Custom env vars like `NOTION_API_TOKEN` are only visible in the agent / orchestrator runtime context. The auth check now happens implicitly the moment the orchestrator makes its first Notion call — same loud failure, just a few seconds later in the run. Don't try to invoke `notion-api.py` from the setup script; it will always fail with `no_token`.
+
+> **Why no backslash line-continuations.** Web text inputs (including the Routine UI's setup-script field) can strip trailing whitespace or normalize line endings in ways that break `\`-continuation. Keep each shell statement on a single line; extract values to their own variables (like `DATE=$(date ...)`) instead of using inline `\` joins.
 
 ### 3.3 — Create the Routine
 

@@ -4,6 +4,25 @@ All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Chang
 
 ---
 
+## [2.3.4] — 2026-05-01
+
+### Setup script no longer attempts auth pre-check (can't work in pre-init context)
+
+Second test-fire of the Cloud Routine got past the line-continuation fix from v2.3.3 but failed with `{"error": "no_token"}` from `notion-api.py users-me`. Root cause: the Routine's setup-script context runs **before** the agent runtime is loaded, and **does not see custom environment variables** — only Claude-cloud and system vars. So the `python3 ... users-me` auth pre-check could never have worked from the setup script regardless of token validity.
+
+The auth pre-check belongs in the agent context (where env vars ARE visible). Removing it from setup means a malformed token now surfaces a few seconds later (at the orchestrator's first Notion call) instead of in the setup phase — same failure mode, slightly less fast-fail. Acceptable given that the setup-context restriction makes the cleaner pre-check impossible.
+
+- **Fixed** — `INSTALL.md` §3.2c setup script: removed the `python3 "$NOTION_API" users-me ...` line. Setup now only writes the `state/.setup_complete` sentinel and exits.
+- **New** — `INSTALL.md` §3.0 ("How a Routine actually runs") now explicitly lists this as a Routine-architectural quirk: setup-script context vs. agent runtime context have different env-var visibility, and custom env vars are only available in the latter.
+- **New** — `INSTALL.md` §3.2c warning callout: do NOT invoke anything that needs `NOTION_API_TOKEN` from the setup script; it will always fail with `no_token`.
+- **Updated** — `skills/run-job-search/SKILL.md` setup-script reference matches.
+
+### Versions
+
+- Plugin: 2.3.3 → 2.3.4
+
+---
+
 ## [2.3.3] — 2026-05-01
 
 ### Setup script fix — backslash line-continuation breaks in Routine UI
