@@ -225,7 +225,9 @@ Supported ATS types: `ashby`, `greenhouse`, `comeet`, `html_static`, `static_rol
 
 Write the `candidates` array from Pass 1 to a file (e.g. `/tmp/pass2-candidates.json`), then invoke **validate-urls** with the path:
 
-> "Run validate-jobs.py on `/tmp/pass2-candidates.json`. Returns live / closed / uncertain. Pass only `live` forward to compile-write; surface `uncertain` in the run summary for manual review."
+> "Run validate-jobs.py on `/tmp/pass2-candidates.json`. Returns live / closed / uncertain. Pass `live` AND `uncertain` forward to compile-write — uncertains get written to the tracker with `Status: Uncertain` so the user can spot-check them in Notion. Closed entries don't get passed (they're handled separately as removed_jobs from Pass 1's diff)."
+
+**Why uncertains now get written (v2.5.2):** Pre-v2.5.2, uncertains were dropped at this boundary — only `live` went forward. But Pass 4 still persisted their job IDs to state, which meant the next run's diff treated them as "seen" and they were silently consumed. User never saw them. Now uncertains travel with live to compile-write and land in the tracker with a distinct status, preserving review opportunity.
 
 The agent uses an **API-based validator** (`scripts/validate-jobs.py`) that queries each ATS's posting API directly — same endpoints `fetch-and-diff.py` uses to enumerate jobs. This replaces v2.2.0's WebFetch + HTML closure-signal approach, which produced ~65% false-negatives on SPA-rendered ATS (Ashby, Lever) because non-JS clients see only an empty shell.
 
@@ -235,19 +237,24 @@ The validator is fast — one API call per unique `(ats, slug)` group, paralleli
 
 ### Pass 3 — Score & Write (compile-write agent)
 
-Invoke **compile-write** with the live-validated candidates, the `removed_jobs` array from Pass 1, AND the resolved IDs from `cached-ids.json` (so the agent doesn't re-resolve):
+Invoke **compile-write** with both live and uncertain candidates from Pass 2, the `removed_jobs` array from Pass 1, AND the resolved IDs from `cached-ids.json`:
 
 ```
-Inputs to pass:
-  - Candidates file:      /tmp/pass3-input.json
-  - Removed jobs:         from Pass 1
-  - Tracker DB ID:        <cached-ids.tracker_database_id>
+Inputs to pass (write to /tmp/pass3-input.json):
+{
+  "live":            [<candidates Pass 2 confirmed live>],
+  "uncertain":       [<candidates Pass 2 couldn't validate either way>],
+  "removed_jobs":    [<from Pass 1 — closures>],
+  "tracker_db_id":   "<cached-ids.tracker_database_id>"
+}
+
+Other paths (passed inline):
   - Profile path:         /tmp/profile.json (cloud mode) or config/profile.json (local)
   - Connectors path:      ./config/connectors.json
 ```
 
 Prompt:
-> "Score each candidate using the profile rubric (max_score, criteria, bonuses, exclusion_rules from profile.json — see agents/compile-write.md Step 3 for the algorithm). Apply hard exclusions FIRST (see Step 2). Write qualifying jobs to the tracker DB (ID provided). Mark removed_jobs as Closed. Return newly written jobs.
+> "Score each candidate using the profile rubric (max_score, criteria, bonuses, exclusion_rules from profile.json — see agents/compile-write.md Step 3 for the algorithm). Apply hard exclusions FIRST (see Step 2). Write qualifying live jobs with `Status: New`. Write uncertains that pass hard exclusions with `Status: Uncertain` (no scoring required for uncertains — user triages in Notion). Mark removed_jobs as Closed. Return newly written jobs (live AND uncertain).
 >
 > Notion writes use scripts/notion-api.py for api_token mode, or the resolved MCP prefix for mcp mode (read connectors.json[notion.auth_method] to decide). On Notion write failure, do NOT fall back to markdown silently — abort and report. The orchestrator decides fallback strategy."
 

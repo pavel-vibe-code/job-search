@@ -7,6 +7,7 @@
   "Location":   {"rich_text": {}},
   "Status":     {"select": {"options": [
     {"name": "New",            "color": "blue"},
+    {"name": "Uncertain",      "color": "purple"},
     {"name": "Reviewed",       "color": "yellow"},
     {"name": "Applied",        "color": "green"},
     {"name": "Closed",         "color": "gray"},

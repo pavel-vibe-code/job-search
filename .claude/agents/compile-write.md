@@ -121,8 +121,16 @@ The orchestrator passes the following into your prompt:
 - **Tracker DB ID** (resolved by run-job-search Step P-3 from `state/cached-ids.json`)
 - **Profile path** — `/tmp/profile.json` (cloud mode) or `./config/profile.json` (local mode)
 - **Connectors path** — `./config/connectors.json` (read auth_method + mcp_tool_prefix)
-- **Candidates file** — `/tmp/pass3-input.json`
-- **Removed jobs** — array (may be empty)
+- **Candidates file** — `/tmp/pass3-input.json`. Schema (v2.5.2+):
+  ```json
+  {
+    "live":         [<candidates Pass 2 confirmed live>],
+    "uncertain":    [<candidates Pass 2 couldn't confirm — write with Status:Uncertain>],
+    "removed_jobs": [<closures from Pass 1 — mark Closed>],
+    "tracker_db_id": "..."
+  }
+  ```
+  Earlier versions (v2.5.1 and prior) passed candidates as a flat array (live only). For backward compat, if `pass3-input.json` is a JSON array, treat it as `{"live": <array>, "uncertain": [], "removed_jobs": [], ...}`.
 
 Read the profile JSON for:
 - `scoring.criteria` — required, dict of weighted criteria
@@ -215,7 +223,7 @@ Create a new page per qualifying job. **Schema must match what the wizard create
 | `Company`     | rich_text       | Company name (NOT a select)                  |
 | `Score`       | number          | Final fit score                              |
 | `Location`    | rich_text       | Location string                              |
-| `Status`      | select          | "New" (other options: Reviewed, Applied, Closed, Not interested) |
+| `Status`      | select          | "New" for live qualifying jobs; "Uncertain" for Pass-2-uncertain entries (see Step 4b) |
 | `URL`         | url             | Direct ATS URL                               |
 | `Department`  | rich_text       | Department string from ATS (or empty)        |
 | `Source`      | rich_text       | "ai50" or "favorites"                        |
@@ -225,6 +233,26 @@ Create a new page per qualifying job. **Schema must match what the wizard create
 When using `notion-api.py create-pages`, the helper's `pack_properties` heuristic accepts a flat `{name: value}` shape; pre-built nested objects (like `{"Status": {"select": {"name": "New"}}}`) pass through unchanged.
 
 `connector_type` is hard-pinned to `"notion"` for production runs. Markdown output is NOT a branch this agent takes — the orchestrator drives the markdown fallback by reading `/tmp/compile-write-failed.json` (see "Failure contract" above) when this agent aborts on Notion errors.
+
+## Step 4b — Write uncertain candidates with `Status: Uncertain` (v2.5.2+)
+
+Pre-v2.5.2, Pass 2 uncertains were dropped at the orchestrator → compile-write boundary. Pass 4 still persisted their job IDs to state, so next run's diff treated them as "seen" and they were silently consumed without ever reaching the user. Real bug — surfaced after v2.4.0 first cloud-routine fire showed 41 uncertains across Deel / JetBrains / Back Market and others.
+
+**Now** — uncertains travel with live to compile-write and get written to the tracker with a distinct `Status: Uncertain`. Process:
+
+1. Read `pass3-input.json` for the `uncertain` array.
+2. Apply the **same hard exclusions** as live candidates (Step 2). An uncertain that violates a hard exclusion (e.g. wrong country) is dropped before writing — no value in surfacing it.
+3. Skip uncertains whose URL already exists in the tracker (same dedup logic as live).
+4. **Do NOT score** uncertains — there's no validation signal, so any score would be misleading. Set `Score: null` (or 0 if the field rejects null).
+5. **Do NOT include in hot list** — uncertains don't have validated state and shouldn't dominate the user's high-priority view.
+6. Write each uncertain with:
+   - `Status: "Uncertain"` (the new select value added in v2.5.2's tracker schema)
+   - `Why Fits`: replace the rationale with a brief uncertain-reason note from Pass 2's output, e.g. *"Validator could not confirm live (reason: ats_unsupported:lever). User to spot-check."*
+   - All other fields populated as for live entries.
+
+Returned in the orchestrator response under a new `uncertain_written` array (parallel to the existing live-jobs return). The orchestrator surfaces the count in the run summary so the user knows how many to triage.
+
+If a user marks an uncertain entry as `Reviewed` / `Applied` / `Not interested` in Notion, the next run's tracker query (Step 4 dedup check) sees the URL and skips it — no special handling needed.
 
 ## Step 5 — Mark removed jobs as closed
 

@@ -4,6 +4,34 @@ All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Chang
 
 ---
 
+## [2.5.2] — 2026-05-03
+
+### Uncertain-job tracker handling (fixes silent state-poisoning)
+
+Pre-v2.5.2 bug surfaced by the v2.4.0 first-run: 41 jobs from Deel / JetBrains / Back Market that Pass 2 couldn't validate either-way got dropped at the orchestrator → compile-write boundary, but Pass 4 still persisted their job IDs to state. Net effect: state DB thought "we've seen these," next run's diff treated them as historical, **user never saw them**. Permanent invisibility for any company whose ATS the validator can't probe.
+
+- **New** — `Uncertain` value in the Tracker DB Status enum (purple). `scripts/schemas/tracker_db.json` updated; setup wizard creates DBs with the new option included; existing trackers can have the option added manually in Notion (or recreate via the orchestrator's `recreate_ok` path).
+- **Updated** — `.claude/skills/run-job-search/SKILL.md` Pass 2 → Pass 3 wiring: pass3-input.json schema is now `{live, uncertain, removed_jobs, tracker_db_id}` envelope (previously a flat live-only array). Backward compat: agents accepting the old flat-array form treat it as `{live: <array>, uncertain: [], ...}`.
+- **Updated** — `.claude/agents/compile-write.md` § Step 4b: process uncertains with the same hard exclusions as live, write with `Status: Uncertain`, `Score: null`, `Why Fits` populated with Pass 2's uncertain reason. Don't include in hot list.
+- **Updated** — Run summary surfaces uncertain count alongside live + closed counts so users know how many to triage.
+
+### New skill: `recalibrate-scoring`
+
+Manual-dialog skill for tuning the scoring rubric based on what the user saw in recent runs. Foundation for the v3.0 learning loop — same conceptual flow (snapshot → critique → propose → confirm → write), just user-driven dialogue instead of automated label-recycling.
+
+- **New** — `.claude/skills/recalibrate-scoring/SKILL.md`. Six steps: read context, surface critique-friendly view (top of hot, bottom of hot, just-below-threshold), translate feedback into specific mutations (with predicted score deltas), show diff, get approval, write updated profile to source-of-truth.
+- **Promotion logic** — when user feedback implies a binary requirement ("must be EU", "never if Marketing"), the skill explicitly proposes promoting the rule from `scoring.criteria` to `hard_exclusions.rules` rather than just tweaking weights. Catches the same wizard-translation bugs that v2.5.1 prevents at capture time.
+- **Invocation** — explicit user command: *"recalibrate the scoring"*, *"adjust the scoring rubric"*, *"the hot list looks off"*, etc.
+- **Bridge to v3.0** — skill SKILL.md documents the path forward: same flow becomes automated via Notion `Match Quality` labels + `feedback-recycle` skill in v3.0.
+
+### Versions
+
+- Plugin: 2.5.1 → 2.5.2
+- Tests: 164 (no test changes — markdown + schema-only changes)
+- Skills: run-job-search, setup, validate-favorites, **recalibrate-scoring** (new)
+
+---
+
 ## [2.5.1] — 2026-05-03
 
 ### Wizard generates typed `hard_exclusions` rules
