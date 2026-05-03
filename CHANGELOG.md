@@ -4,6 +4,73 @@ All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Chang
 
 ---
 
+## [3.0.5] — 2026-05-03
+
+### Token tracking per run (cost observability)
+
+v3's LLM scoring path makes per-run cost a real consideration — Opus 4.7 with extended thinking on ~200 candidates is meaningfully more expensive than Sonnet without. v3.0.5 surfaces token usage and cost estimate in every run summary so the user can see what they're paying and decide if model choice / scope tightens needed.
+
+### Pass-level usage envelopes
+
+Each LLM-calling agent now returns a `usage` object in its response envelope:
+
+```json
+{
+  "usage": {
+    "model":                       "claude-opus-4-7",
+    "extended_thinking":           true,
+    "candidates_scored":           14,
+    "input_tokens":                245000,
+    "cache_read_input_tokens":     200000,
+    "cache_creation_input_tokens": 5000,
+    "output_tokens":               8500,
+    "thinking_tokens":             56000,
+    "parse_failures":              0
+  }
+}
+```
+
+Agents updated:
+- `compile-write.md` Step 6 — return envelope `{newly_written_jobs, uncertain_written, usage}`. Backcompat: legacy array-shape responses still accepted.
+- `notify-hot.md` Step 5 — return envelope with summary fields + usage. `usage: null` if no LLM calls were made (pure-template path).
+- `recalibrate-scoring/SKILL.md` Step 6 — usage printed inline (manual invocation only).
+- `feedback-recycle/SKILL.md` Step 6 — usage in envelope when invoked from Pass 6 auto-trigger; printed inline when manually invoked.
+
+### Run-summary token block
+
+Orchestrator's run summary (run-job-search SKILL.md § Output) now includes a token + cost block that aggregates across passes:
+
+```
+━━━ Token usage ━━━
+Pass 3 (compile-write):     245K input (200K cached), 8.5K output  | opus-4-7 + thinking
+Pass 5 (notify-hot):        12K input, 1.2K output                  | sonnet-4-6
+Pass 6 (feedback-recycle):  skipped — gate not met: last cycle 2 days ago
+─────
+Total: 257K input (200K cached), 9.7K output
+Estimated cost: $1.42 (Opus) + $0.05 (Sonnet) = $1.47
+```
+
+### Cost calculation
+
+Anthropic published rates table embedded in the orchestrator's aggregation logic. Cost formula per pass: `(input - cache_read) × input_rate + cache_read × cache_rate + output × output_rate + thinking × output_rate`. Summed across passes for total. Two-decimal display.
+
+### Backward compat
+
+If an agent returns the pre-v3.0.5 array shape (no envelope, no usage): orchestrator treats as `{newly_written_jobs: <array>, usage: null}` and prints *"(usage data unavailable — agent pre-v3.0.5)"* in the breakdown. No crash on missing keys. As Routine clones latest `main`, all agents pick up the v3.0.5 contract on next fire.
+
+### What's NOT in v3.0.5
+
+- **Persistence** — token usage is print-only; not yet persisted to a Notion Run Log page or local jsonl. Trend analysis over time isn't possible from within the system. If you want it, copy the run summary into a spreadsheet manually for now. Persistence ships in a later patch if there's appetite.
+- **Per-candidate cost breakdown** — aggregate is per-pass not per-candidate. Adding finer granularity is straightforward but doesn't seem necessary at current usage levels.
+- **Cost guardrails / budget alerts** — system reports cost but doesn't enforce limits. If budget protection is needed, run-job-search SKILL.md could gain a "abort if estimated > $X" check; not in this patch.
+
+### Versions
+
+- Plugin: 3.0.4 → 3.0.5
+- Tests: 164 (no test changes — agent prompt + run-summary formatting only)
+
+---
+
 ## [3.0.4] — 2026-05-03
 
 ### Fix: `update-page --replace-content` failed without `--properties`

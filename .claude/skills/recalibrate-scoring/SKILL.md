@@ -156,10 +156,15 @@ Print:
 Changes applied to profile:
   {bullet list of changes}
 
+Token usage:  {input_tokens} input ({cache_read} cached), {output} output
+              model: {model_id}, est. cost: ${X.XX}
+
 Next run will use the updated rubric. Type "run the job search"
 to test, or come back to recalibrate again after seeing the
 updated tracker.
 ```
+
+Track total token usage across all LLM calls made in this skill (typically: feedback summarization + mutation proposal). Include in the final summary printed to the user. Recalibrate-scoring is always invoked manually (not from the orchestrator's Pass 6), so the usage is reported inline rather than returned in an envelope.
 
 Don't auto-trigger the search — the user decides.
 

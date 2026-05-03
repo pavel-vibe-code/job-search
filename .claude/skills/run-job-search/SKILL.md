@@ -430,11 +430,20 @@ Validation: {N} live confirmed (of {N} checked)
 Tracker: {N} new entries written | {N} marked closed
 State: {Notion DB ✓ | local file ✓}
 
-🔥 Hot matches ({N} at score ≥ {threshold}):
-  • {Score} — {Company}: {Title} [{location}]
+🔥 Hot matches ({N} at score ≥ {threshold} OR Match: High in v3 path):
+  • {Score or Match} — {Company}: {Title} [{location}]
 
 Hot list: {Notion page URL or file path}
 Tracker connector: {connected / fallback}
+
+━━━ Token usage (v3.0.5+) ━━━
+Pass 3 (compile-write):     {input}K input ({cache_read}K cached), {output}K output  | model: {model}{ + thinking budget}
+Pass 5 (notify-hot):        {input}K input, {output}K output                            | model: {model}
+Pass 6 (feedback-recycle):  {input}K input, {output}K output                            | model: {model}
+                            (or "skipped — gate not met: last cycle {N} days ago")
+─────
+Total:    {total_input}K input ({total_cache_read}K cached), {total_output}K output
+Estimated cost: ${X.XX} ({per-pass breakdown if multi-model})
 
 Static-roles notifications (low-confidence, not saved to tracker):
   • {Company}: {Title} — {one-line role description}
@@ -447,6 +456,24 @@ Permanently skipped:
 ```
 
 If zero qualifying roles this run, say so explicitly. Don't pad.
+
+### Token + cost aggregation (v3.0.5+)
+
+The orchestrator collects `usage` objects from each pass's response envelope (compile-write returns it after Pass 3; notify-hot after Pass 5; feedback-recycle after Pass 6 if invoked). Aggregate the totals; compute estimated cost using Anthropic's published rates:
+
+| Model | Input ($/Mtok) | Output ($/Mtok) | Cache read ($/Mtok) |
+|---|---|---|---|
+| `claude-opus-4-7` | 15 | 75 | 1.50 |
+| `claude-sonnet-4-6` | 3 | 15 | 0.30 |
+| `claude-haiku-4-5-20251001` | 0.80 | 4 | 0.08 |
+
+Cost formula per pass: `(input_tokens - cache_read_input_tokens) × input_rate + cache_read_input_tokens × cache_rate + output_tokens × output_rate + (thinking_tokens, if any) × output_rate`. Use whichever model the pass actually invoked.
+
+Sum across passes for total run cost. Round to 2 decimal places in display.
+
+If a pass returns `usage: null` (e.g. notify-hot in legacy path that just renders templates without LLM calls): omit it from the breakdown and skip it in the aggregate.
+
+If `usage` is missing entirely (pre-v3.0.5 agent that doesn't return the envelope): print *"(usage data unavailable — agent pre-v3.0.5)"* in that pass's row rather than crashing on missing keys. Pass 6 in run-job-search SKILL.md ships v3.0.5+; older agents in cache should be invalidated by the next clone.
 
 ---
 

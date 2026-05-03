@@ -337,6 +337,7 @@ Step 5 — Output JSON only:
 - **Anthropic prompt caching** is mandatory for the constant profile section (narrative + cv_json + scoring.instructions + few_shot_examples). Cache control: `{"type": "ephemeral"}` on the profile content block. Across ~200 candidates this is the difference between $30 and $150 per run on Opus.
 - **temperature=0** for stability across runs. Categorical decisions should be sticky.
 - **Parse the response as JSON.** If parsing fails, log the raw response and assign `Mid` with `confidence: "low"` and rationale noting the parse failure — never fail the run on a single LLM hiccup. Track parse-failure count in run summary so we can detect prompt drift.
+- **Track token usage** (v3.0.5+). Anthropic API responses include a `usage` object: `{input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens}`. Accumulate across all N candidate scoring calls in this run. Include the totals in the success-response envelope returned to the orchestrator (see Step 6 — "Return new jobs to orchestrator"). The orchestrator aggregates across passes and prints a token+cost block in the run summary.
 
 **Quality bar:** the `rationale` and `key_factors` should make the verdict defensible to a reader who has only the JD + profile in front of them. If you (the agent) wrote a rationale that could equally apply to any role with the same title, the rationale is too generic — re-prompt or downgrade confidence.
 
@@ -419,22 +420,41 @@ This keeps the tracker accurate without requiring manual cleanup. Removed jobs y
 
 ## Step 6 — Return new jobs to orchestrator
 
-Return only jobs actually written this run (new, not duplicates, score ≥ threshold):
+Return an envelope with both the newly-written jobs AND the token usage from this pass (v3.0.5+):
 
 ```json
-[
-  {
-    "company": "ElevenLabs",
-    "title": "Customer Success Lead, Western Europe",
-    "url": "https://...",
-    "location": "Remote (EU/EMEA)",
-    "role_type_ids": ["cx-support-leadership"],
-    "fit_score": 7,
-    "why_fits": "...",
-    "source": "ai50"
+{
+  "newly_written_jobs": [
+    {
+      "company": "ElevenLabs",
+      "title": "Customer Success Lead, Western Europe",
+      "url": "https://...",
+      "location": "Remote (EU/EMEA)",
+      "role_type_ids": ["cx-support-leadership"],
+      "fit_score": 7,
+      "match": "High",
+      "why_fits": "...",
+      "source": "ai50"
+    }
+  ],
+  "uncertain_written": [/* same shape, written with Status: Uncertain (v2.5.2+) */],
+  "usage": {
+    "model": "claude-opus-4-7",
+    "extended_thinking": true,
+    "candidates_scored": 14,
+    "input_tokens": 245000,
+    "cache_read_input_tokens": 200000,
+    "cache_creation_input_tokens": 5000,
+    "output_tokens": 8500,
+    "thinking_tokens": 56000,
+    "parse_failures": 0
   }
-]
+}
 ```
+
+`usage` accumulates across all N candidate scoring calls in this pass. The orchestrator aggregates across passes (compile-write + notify-hot + recalibrate-scoring + feedback-recycle when invoked) and prints a single token+cost block in the run summary.
+
+For backward compat with pre-v3.0.5 orchestrators that expect just an array, ALSO accept that shape — orchestrator should handle both: if the response is an array, treat as `newly_written_jobs` with `usage: null`. Modern orchestrators get the envelope.
 
 ## Step 7 — Run summary
 

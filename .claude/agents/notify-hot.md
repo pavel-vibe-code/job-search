@@ -187,8 +187,25 @@ If Notion returns an auth error or any 4xx/5xx, **abort and emit `/tmp/notify-ho
 
 ## Step 5 — Output summary
 
-Return a brief summary to the orchestrator:
-- Hot threshold used: {N}
-- Hot matches: {N} (list company + title + score)
-- Document created: {URL or file path}
-- Connector status: connected / fallback
+Return an envelope with summary fields AND token usage (v3.0.5+):
+
+```json
+{
+  "hot_threshold_used":  {N or "High bucket (v3 path)"},
+  "hot_matches":         {N},
+  "hot_entries":         [{company, title, score_or_match, location}, ...],
+  "document_url":        "...",
+  "connector_status":    "connected" | "fallback",
+  "usage": {
+    "model":             "claude-sonnet-4-6",
+    "input_tokens":      12000,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "output_tokens":     1200
+  }
+}
+```
+
+This pass typically uses Sonnet (or whatever model the agent picks for digest formatting — no extended thinking needed). `usage` is rolled up by the orchestrator into the run-summary token block.
+
+If you didn't make any LLM calls in this pass (e.g. zero hot matches, plain template render only), set `usage: null` rather than an empty object — disambiguates "no LLM calls made" from "calls made but returned 0 tokens".

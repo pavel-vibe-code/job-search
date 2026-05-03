@@ -158,11 +158,41 @@ rejected should appear less; patterns the user wanted should
 appear more or surface higher.
 ```
 
-## Step 6 — Optional: schedule next recycle
+## Step 6 — Token usage + summary (v3.0.5+)
+
+Track total token usage across all LLM calls made in this skill's run (typically: anti-pattern synthesis + few-shot example curation, possibly small profile-rewrite calls). Include in the final summary printed to the orchestrator (or to the user, if invoked manually):
+
+```
+━━━ Feedback recycle complete ━━━
+Processed labels:    {N entries}
+Strong disagreements: {N}
+Anti-patterns added:  {N}
+Few-shot examples:    {N} (total now {M}/10)
+
+Token usage:  {input_tokens} input ({cache_read} cached), {output} output
+              model: {model_id}, est. cost: ${X.XX}
+```
+
+If invoked from run-job-search Pass 6, return the usage in an envelope so the orchestrator's aggregate token block reflects feedback-recycle's contribution:
+
+```json
+{
+  "entries_processed": N,
+  "anti_patterns_added": M,
+  "few_shot_added": K,
+  "usage": {
+    "model": "claude-sonnet-4-6",
+    "input_tokens": 8000,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "output_tokens": 1500
+  }
+}
+```
 
 If invoked manually, suggest *"Run feedback-recycle again after your next routine fire to compound the learning. The more labels you provide, the better the signal."*
 
-If invoked automatically (cloud Routine end-of-fire integration in v3.0.0), just log the recycle and continue.
+If invoked automatically (cloud Routine Pass 6), just log the recycle and continue.
 
 ---
 
