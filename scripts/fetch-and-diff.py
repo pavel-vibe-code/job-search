@@ -361,12 +361,81 @@ def fetch_ashby(company: dict) -> Tuple[list, Optional[str]]:
         return [], f"parse_error:{e}"
 
 
+GREENHOUSE_API_HOSTS = [
+    "https://boards-api.greenhouse.io",       # classic / US
+    "https://boards-api.eu.greenhouse.io",    # EU data residency (v3.1.1+)
+]
+
+
 def fetch_greenhouse(company: dict) -> Tuple[list, Optional[str]]:
-    data, err = http_get(GREENHOUSE_API.format(slug=company["slug"]))
+    """Try classic Greenhouse API first; on 404, try EU data-residency API.
+
+    A company on Greenhouse-EU returns 404 from the classic boards-api and
+    vice-versa. v3.1.1 added EU host fallback (mirrors validate-jobs.py from
+    v3.0.6) so Parloa, JetBrains, etc. (companies on EU data residency) can
+    be fetched.
+    """
+    last_err = None
+    for host in GREENHOUSE_API_HOSTS:
+        data, err = http_get(host + f"/v1/boards/{company['slug']}/jobs")
+        if not err:
+            try:
+                return json.loads(data.decode("utf-8")).get("jobs", []), None
+            except Exception as e:
+                return [], f"parse_error:{e}"
+        last_err = err
+        if not err.startswith("http_404"):
+            return [], err
+    return [], last_err
+
+
+# ── Lever (v3.1.1) ──────────────────────────────────────────────────────────
+LEVER_API = "https://api.lever.co/v0/postings/{slug}?mode=json"
+
+
+def fetch_lever(company: dict) -> Tuple[list, Optional[str]]:
+    data, err = http_get(LEVER_API.format(slug=company["slug"]))
     if err:
         return [], err
     try:
-        return json.loads(data.decode("utf-8")).get("jobs", []), None
+        postings = json.loads(data.decode("utf-8"))
+        if not isinstance(postings, list):
+            return [], "unexpected_shape"
+        return postings, None
+    except Exception as e:
+        return [], f"parse_error:{e}"
+
+
+# ── Teamtailor (v3.1.1) ─────────────────────────────────────────────────────
+TEAMTAILOR_API = "https://{slug}.teamtailor.com/api/v1/jobs?page%5Bsize%5D=200"
+
+
+def fetch_teamtailor(company: dict) -> Tuple[list, Optional[str]]:
+    data, err = http_get(TEAMTAILOR_API.format(slug=company["slug"]))
+    if err:
+        return [], err
+    try:
+        body = json.loads(data.decode("utf-8"))
+        # JSON:API envelope: {data: [...], included: [...], meta: {...}}
+        return body.get("data", []), None
+    except Exception as e:
+        return [], f"parse_error:{e}"
+
+
+# ── Homerun (v3.1.1) ────────────────────────────────────────────────────────
+HOMERUN_API = "https://api.homerun.co/v1/jobs/?company_subdomain={slug}"
+
+
+def fetch_homerun(company: dict) -> Tuple[list, Optional[str]]:
+    data, err = http_get(HOMERUN_API.format(slug=company["slug"]))
+    if err:
+        return [], err
+    try:
+        body = json.loads(data.decode("utf-8"))
+        items = body.get("jobs", body) if isinstance(body, dict) else body
+        if not isinstance(items, list):
+            return [], "unexpected_shape"
+        return items, None
     except Exception as e:
         return [], f"parse_error:{e}"
 
@@ -591,10 +660,92 @@ def normalise_static_role(job: dict, company: dict) -> dict:
     }
 
 
+def normalise_lever(job: dict, company: dict) -> dict:
+    """Lever posting structure (v0 API):
+      {id (UUID), text, hostedUrl, applyUrl, categories: {location, team, department, commitment},
+       descriptionPlain, workplaceType: "remote"|"hybrid"|"on-site", createdAt}
+    """
+    cats = job.get("categories", {}) or {}
+    location = cats.get("location") or ""
+    workplace_type = (job.get("workplaceType") or "").strip().lower()
+    is_remote = workplace_type == "remote" or "remote" in location.lower()
+    return {
+        "id":             str(job.get("id", "")),
+        "company":        company["name"],
+        "title":          job.get("text", ""),
+        "url":            job.get("hostedUrl") or job.get("applyUrl") or "",
+        "location":       location,
+        "is_remote":      is_remote and workplace_type != "hybrid",
+        "workplace_type": workplace_type.capitalize() if workplace_type else "",
+        "department":     cats.get("department") or cats.get("team") or "",
+        "published_at":   str(job.get("createdAt") or ""),
+        "source":         company.get("source", "unknown"),
+        "ats":            "lever",
+        "description":    (job.get("descriptionPlain") or "")[:DESCRIPTION_LIMIT],
+    }
+
+
+def normalise_teamtailor(job: dict, company: dict) -> dict:
+    """Teamtailor JSON:API entity:
+      {id, type: "jobs", attributes: {title, body, pitch, location, language, status,
+       remote-status, employment-type, created-at, updated-at, careersite-job-url}}
+    """
+    attrs = job.get("attributes", {}) or {}
+    remote_status = (attrs.get("remote-status") or "").strip().lower()
+    location = attrs.get("location") or ""
+    is_remote = remote_status in ("fully-remote", "remote", "remote-only") or "remote" in str(location).lower()
+    return {
+        "id":             str(job.get("id", "")),
+        "company":        company["name"],
+        "title":          attrs.get("title", ""),
+        "url":            attrs.get("careersite-job-url") or "",
+        "location":       location if isinstance(location, str) else (location or {}).get("name", ""),
+        "is_remote":      is_remote,
+        "workplace_type": "Remote" if is_remote else ("Hybrid" if remote_status == "hybrid" else ""),
+        "department":     attrs.get("department") or "",
+        "published_at":   attrs.get("created-at") or "",
+        "source":         company.get("source", "unknown"),
+        "ats":            "teamtailor",
+        # Teamtailor's body has HTML; pitch is plain. Prefer pitch when present.
+        "description":    (attrs.get("pitch") or attrs.get("body") or "")[:DESCRIPTION_LIMIT],
+    }
+
+
+def normalise_homerun(job: dict, company: dict) -> dict:
+    """Homerun job structure (api.homerun.co/v1/jobs/):
+      {id, title, location, employment_type, remote, description, url (or apply_url), created_at}
+    Homerun's response shape varies; this normaliser handles the documented core fields
+    and degrades gracefully for any company-specific extensions.
+    """
+    location = job.get("location") or ""
+    if isinstance(location, dict):
+        location = location.get("name", "") or " / ".join(filter(None, [
+            location.get("city", ""), location.get("country", "")
+        ]))
+    is_remote = bool(job.get("remote") or job.get("is_remote")) or "remote" in str(location).lower()
+    return {
+        "id":             str(job.get("id", "")),
+        "company":        company["name"],
+        "title":          job.get("title", ""),
+        "url":            job.get("url") or job.get("apply_url") or "",
+        "location":       str(location),
+        "is_remote":      is_remote,
+        "workplace_type": "Remote" if is_remote else "",
+        "department":     job.get("department") or job.get("team") or "",
+        "published_at":   job.get("created_at") or "",
+        "source":         company.get("source", "unknown"),
+        "ats":            "homerun",
+        "description":    (job.get("description") or "")[:DESCRIPTION_LIMIT],
+    }
+
+
 FETCHER_DISPATCH = {
     "ashby":        (fetch_ashby,        normalise_ashby),
     "greenhouse":   (fetch_greenhouse,   normalise_greenhouse),
     "comeet":       (fetch_comeet,       normalise_comeet),
+    "lever":        (fetch_lever,        normalise_lever),         # v3.1.1
+    "teamtailor":   (fetch_teamtailor,   normalise_teamtailor),    # v3.1.1
+    "homerun":      (fetch_homerun,      normalise_homerun),       # v3.1.1
     "html_static":  (fetch_html_static,  normalise_html_static),
     "static_roles": (fetch_static_roles, normalise_static_role),
 }

@@ -4,6 +4,38 @@ All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Chang
 
 ---
 
+## [3.1.1] — 2026-05-04
+
+### Lever, Teamtailor, Homerun fetch + normalise (Pass 1 support)
+
+v3.1.0 made Pass 2 (validate-jobs) work for Lever/Teamtailor/Homerun via the shared `ats_adapters` registry. v3.1.1 completes the loop by adding fetch + normalize support to `fetch-and-diff.py` (Pass 1) so favorites with these ATS types actually produce candidates.
+
+- **New** — `fetch_lever()` + `normalise_lever()`. Lever's v0 public API at `api.lever.co/v0/postings/<slug>?mode=json`. Returns flat array of postings with `id` (UUID), `text`, `hostedUrl`, `categories.{location,department}`, `workplaceType`, `descriptionPlain`. Pre-v3.1.1 lever was detected by validate-favorites but had no fetcher — favorites with `ats: "lever"` produced zero jobs.
+- **New** — `fetch_teamtailor()` + `normalise_teamtailor()`. JSON:API at `<slug>.teamtailor.com/api/v1/jobs?page[size]=200`. Returns JSON:API envelope with each job carrying `attributes.{title, body, pitch, location, remote-status, careersite-job-url, created-at, department}`. Single-page fetch handles up to 200 active jobs; multi-page pagination is a v3.1.x backlog item.
+- **New** — `fetch_homerun()` + `normalise_homerun()`. Central API at `api.homerun.co/v1/jobs/?company_subdomain=<slug>`. Companies use `<slug>.homerun.co` for user-facing pages. Response shape may be `{jobs: [...]}` or bare array — handler accepts both.
+- **Fixed** — `fetch_greenhouse()` now tries classic + EU API hosts (mirrors v3.0.6's validate-jobs fix). Previously, Pass 1 missed jobs from Parloa/JetBrains because they're on `boards-api.eu.greenhouse.io` and the classic host returned 404. Now Pass 1 and Pass 2 both handle EU data residency uniformly.
+- **Updated** — `FETCHER_DISPATCH` registers the three new ATS alongside ashby/greenhouse/comeet/html_static/static_roles. Adding a 4th new ATS in the future is a one-place change in fetch-and-diff (registry entry) + one-place change in ats_adapters (URL pattern + active-id fetcher).
+
+### Cross-pass parity now complete
+
+Both Pass 1 (fetch) and Pass 2 (validate) recognize the same six ATS via the same URL patterns. Same data flows, no silent data loss when adding a favorite of any supported ATS:
+
+| ATS | URL pattern | Fetch (Pass 1) | Validate (Pass 2) |
+|---|---|---|---|
+| Ashby | `(jobs\|job-boards).ashbyhq.com/<slug>` | ✓ | ✓ |
+| Greenhouse | `(boards\|job-boards)(.eu)?.greenhouse.io/<slug>` | ✓ | ✓ |
+| Comeet | `comeet.com/jobs/<slug>` | ✓ | ✓ |
+| **Lever** | `jobs.lever.co/<slug>` | ✓ (new) | ✓ (new in v3.1.0) |
+| **Teamtailor** | `<slug>.teamtailor.com/jobs/...` | ✓ (new) | ✓ (new in v3.1.0) |
+| **Homerun** | `<slug>.homerun.co/...` | ✓ (new) | ✓ (new in v3.1.0) |
+
+### Versions
+
+- Plugin: 3.1.0 → 3.1.1
+- Tests: 172 (no test changes — fetcher/normalizer logic is integration-tested via real ATS APIs which the test suite intentionally doesn't hit; URL patterns covered by v3.1.0's tests)
+
+---
+
 ## [3.1.0] — 2026-05-04
 
 ### Shared `ats_adapters` module — single source of truth for ATS support
