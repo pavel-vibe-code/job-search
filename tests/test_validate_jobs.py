@@ -64,6 +64,45 @@ class AtsFromUrlTests(unittest.TestCase):
         self.assertIsNone(self.mod.ats_from_url("https://careers.nebius.com/?gh_jid=4809236101"))
         self.assertIsNone(self.mod.ats_from_url("https://www.make.com/en/careers-detail?gh_jid=6657197003"))
 
+    # === v3.1.0 — new ATS adapters via shared module ============================
+
+    def test_teamtailor_subdomain(self):
+        self.assertEqual(
+            self.mod.ats_from_url("https://botify.teamtailor.com/jobs/7365872-revenue-operations-manager-emea"),
+            ("teamtailor", "botify"),
+        )
+
+    def test_teamtailor_with_hyphenated_slug(self):
+        self.assertEqual(
+            self.mod.ats_from_url("https://some-co.teamtailor.com/jobs/12345-role-name"),
+            ("teamtailor", "some-co"),
+        )
+
+    def test_homerun_subdomain(self):
+        self.assertEqual(
+            self.mod.ats_from_url("https://gradium.homerun.co/"),
+            ("homerun", "gradium"),
+        )
+
+    def test_homerun_with_path(self):
+        self.assertEqual(
+            self.mod.ats_from_url("https://acme.homerun.co/jobs/some-role"),
+            ("homerun", "acme"),
+        )
+
+
+class SupportedAtsForValidateTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.mod = load_script("validate-jobs.py", "validate_jobs")
+
+    def test_v310_supports_six_ats_for_validate(self):
+        # v3.1.0 expanded validate-able ATS set from {ashby, greenhouse, comeet}
+        # to include lever, teamtailor, homerun. This test pins that count so a
+        # regression that drops one is caught.
+        supported = self.mod.supported_ats_for_validate()
+        self.assertEqual(supported, {"ashby", "greenhouse", "comeet", "lever", "teamtailor", "homerun"})
+
     def test_lever(self):
         # Lever is recognized as an ATS but not currently supported by the validator;
         # returns (lever, slug) so downstream code can dispatch or mark unsupported.

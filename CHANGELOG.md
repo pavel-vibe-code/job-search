@@ -4,6 +4,32 @@ All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Chang
 
 ---
 
+## [3.1.0] — 2026-05-04
+
+### Shared `ats_adapters` module — single source of truth for ATS support
+
+Adding a new ATS pre-v3.1.0 required touching three scripts and duplicating regex/URL/API logic across them. v3.1.0 extracts ATS knowledge into a single shared module so the next ATS (Workable, Personio, Recruitee, etc.) is a one-place change.
+
+- **New** — `scripts/ats_adapters.py`. Single registry (`ATS_ADAPTERS` dict) keyed by ATS name, with each entry defining: URL regex, active-id fetcher callable, and `active_validate_supported` flag. Plus dispatch helpers (`ats_from_url()`, `active_ids_for()`, `supported_ats_for_validate()`).
+- **Refactored** — `scripts/validate-jobs.py` now imports from `ats_adapters` instead of defining its own URL patterns, API constants, and per-ATS fetcher functions. Re-exports for backward-compat with tests + external callers.
+- **Migrated** — Ashby, Greenhouse, Comeet, Lever moved from inline-in-script definitions to registry entries. Greenhouse's classic+EU-data-residency dual-host fetcher (added in v3.0.6) consolidated into one function in the registry.
+- **New ATS support added in registry (validate side only — fetch side ships in v3.1.1):**
+  - **Lever** — `jobs.lever.co/<slug>`. Active-ID fetcher uses `api.lever.co/v0/postings/<slug>?mode=json`. Pre-v3.1.0 the URL pattern existed but was marked as "recognized but unsupported" in the dispatch logic; now first-class.
+  - **Teamtailor** — `<slug>.teamtailor.com/jobs/<id>-<title-slug>`. JSON:API at `<slug>.teamtailor.com/api/v1/jobs?page[size]=200`. Used by Botify and many EU companies.
+  - **Homerun** — `<slug>.homerun.co/...` user-facing pages, central API at `api.homerun.co/v1/jobs/?company_subdomain=<slug>`.
+
+### What v3.1.0 does NOT do
+
+- **fetch-and-diff.py is unchanged** for the new ATS. v3.1.0 makes Pass 2 (validation) work for Lever/Teamtailor/Homerun, but Pass 1 (fetch) doesn't have fetchers + normalizers for them yet. That ships in **v3.1.1**.
+- **Until v3.1.1 ships**, adding a Lever/Teamtailor/Homerun favorite still produces zero jobs in your tracker — the validation path improvement only matters once fetch can produce candidates for those ATS.
+
+### Versions
+
+- Plugin: 3.0.6 → 3.1.0
+- Tests: 167 → 172 (+5: 4 new URL patterns, 1 supported_ats_for_validate set assertion)
+
+---
+
 ## [3.0.6] — 2026-05-04
 
 ### Fix: Pass 2 used the wrong favorites source in cloud mode
