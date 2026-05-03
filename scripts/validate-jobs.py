@@ -49,6 +49,34 @@ COMEET_API     = "https://www.comeet.co/careers-api/2.0/company/{company_id}/pos
 USER_AGENT     = "Mozilla/5.0 (compatible; ai50-job-search/1.0)"
 TIMEOUT_S      = 20
 
+# URL-based ATS detection. Each entry: (compiled regex, ats_name, slug_capture_group).
+# Patterns match the listing's URL field to derive ATS deterministically, even
+# when the company name in the candidate doesn't match any index entry.
+# Introduced v2.5.0 to fix the class of "uncertain" failures where index lookup
+# misses (typos, casing, "skip"-marked-but-jobs-still-fetched) but URL is
+# unambiguous. URL-based dispatch is the primary signal; name-index is fallback.
+ATS_URL_PATTERNS = [
+    (re.compile(r'^https?://(?:jobs|job-boards)\.ashbyhq\.com/([^/]+)'),     'ashby',      1),
+    (re.compile(r'^https?://(?:boards|job-boards)\.greenhouse\.io/([^/]+)'), 'greenhouse', 1),
+    (re.compile(r'^https?://jobs\.lever\.co/([^/]+)'),                        'lever',      1),
+    (re.compile(r'^https?://www\.comeet\.com/jobs/([^/]+)'),                  'comeet',     1),
+]
+
+
+def ats_from_url(url: Optional[str]) -> Optional[Tuple[str, str]]:
+    """Parse a listing URL to derive (ats_name, slug). Returns None if no pattern matches.
+
+    Used as the primary dispatch signal in validate-jobs (v2.5.0+). Replaces
+    name-index lookup as the first attempt; name-index is fallback.
+    """
+    if not url:
+        return None
+    for pattern, ats, group_idx in ATS_URL_PATTERNS:
+        m = pattern.match(url)
+        if m:
+            return ats, m.group(group_idx)
+    return None
+
 
 def http_get(url: str, accept: str = "application/json") -> Tuple[Optional[bytes], Optional[str]]:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": accept})
@@ -107,11 +135,20 @@ def fetch_active_ids_comeet(slug: str, company_id: str, careers_url: str) -> Tup
 
 
 def load_companies_index(plugin_root: str) -> Dict[str, dict]:
-    """Map company name (lowercased) → company config dict (with ats, slug, etc.)."""
+    """Map company name (lowercased) → company config dict (with ats, slug, etc.).
+
+    Precedence: companies.json wins on duplicate names — consistent with
+    fetch-and-diff.py. Pre-v2.5.0 this script had favorites overriding
+    companies (last-writer-wins by load order), creating a rare-but-real bug
+    where a job that fetched fine via companies.json's `ats: greenhouse` would
+    get marked uncertain in validate via favorites.json's `ats: skip` for the
+    same company.
+    """
     idx: Dict[str, dict] = {}
+    # Load favorites first, companies second — companies wins on duplicate.
     for path in (
-        os.path.join(plugin_root, "config", "companies.json"),
         os.path.join(plugin_root, "config", "favorites.json"),
+        os.path.join(plugin_root, "config", "companies.json"),
     ):
         if not os.path.exists(path):
             continue
@@ -163,19 +200,37 @@ def main():
 
     # Group candidates by (ats, slug). One API call per group fetches the full
     # active-id set, against which we test every candidate in that group.
+    #
+    # Dispatch order (v2.5.0+):
+    #   1. Try URL-based ATS detection (parses candidate.url against known ATS host
+    #      patterns). Deterministic; works even when the company name doesn't match
+    #      any index entry.
+    #   2. Fall back to name-index lookup (legacy path).
+    # Both paths converge on the same (ats, slug) group key.
     groups: Dict[Tuple[str, str], List[dict]] = defaultdict(list)
-    unknown_company: List[dict] = []
+    unknown_company: List[Tuple[dict, str]] = []  # (candidate, reason_hint)
+
     for c in candidates:
+        # 1. URL-based dispatch (primary)
+        url_resolved = ats_from_url(c.get("url"))
+        if url_resolved is not None:
+            ats, slug = url_resolved
+            if ats in ("ashby", "greenhouse", "comeet"):
+                groups[(ats, slug)].append({**c, "_cfg": {"ats": ats, "slug": slug, "_resolved_via": "url"}})
+                continue
+            # URL recognized but ATS not supported (e.g. lever) — name-index might still help
+            # if the company is registered with an alternate ats; fall through to name lookup.
+
+        # 2. Name-index dispatch (fallback)
         resolved = slug_for(c, companies)
         if resolved is None:
-            unknown_company.append(c)
+            unknown_company.append((c, "company_name_not_in_index"))
             continue
         _, cfg = resolved
         ats = cfg.get("ats")
         slug = cfg.get("slug") or cfg.get("company_id") or ""
         if ats not in ("ashby", "greenhouse", "comeet"):
-            # html_static / static_roles / external — fall through; we can't validate via API
-            unknown_company.append(c)
+            unknown_company.append((c, f"ats_unsupported:{ats}"))
             continue
         groups[(ats, slug)].append({**c, "_cfg": cfg})
 
@@ -225,8 +280,8 @@ def main():
             else:
                 closed.append({"id": c.get("id"), "title": c.get("title"), "company": c.get("company"), "reason": "id_not_in_active_set"})
 
-    for c in unknown_company:
-        uncertain.append({"id": c.get("id"), "title": c.get("title"), "company": c.get("company"), "reason": "no_api_for_ats_or_company_unknown"})
+    for c, reason in unknown_company:
+        uncertain.append({"id": c.get("id"), "title": c.get("title"), "company": c.get("company"), "url": c.get("url"), "reason": reason})
 
     out = {
         "live": live,

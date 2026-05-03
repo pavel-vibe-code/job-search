@@ -30,3 +30,6 @@ __pycache__/
 .idea/
 .vscode/
 *.swp
+
+# Local fresh-install test scratch directory (cloned copy of this repo)
+/job-search/

@@ -12,6 +12,7 @@ Usage:
 
 import json
 import os
+import re
 import sys
 import urllib.request
 import urllib.error
@@ -29,6 +30,26 @@ GREENHOUSE_API = "https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
 LEVER_API      = "https://api.lever.co/v0/postings/{slug}?mode=json"
 
 FETCH_TIMEOUT = 12
+
+# URL-based ATS detection (v2.5.0). When a favorites entry includes a
+# `careers_url` field, parse it to derive (ats, slug) deterministically rather
+# than running through slow slug-variant probing. Mirrors validate-jobs.py.
+ATS_URL_PATTERNS = [
+    (re.compile(r'^https?://(?:jobs|job-boards)\.ashbyhq\.com/([^/]+)'),     'ashby'),
+    (re.compile(r'^https?://(?:boards|job-boards)\.greenhouse\.io/([^/]+)'), 'greenhouse'),
+    (re.compile(r'^https?://jobs\.lever\.co/([^/]+)'),                        'lever'),
+]
+
+
+def ats_from_url(url):
+    """Parse careers_url to derive (ats, slug). Returns None if no match."""
+    if not url:
+        return None
+    for pattern, ats in ATS_URL_PATTERNS:
+        m = pattern.match(url)
+        if m:
+            return ats, m.group(1)
+    return None
 
 
 def build_url(ats: str, slug: str) -> str:
@@ -91,21 +112,39 @@ def slug_variants(name: str, original_slug: str) -> list[tuple[str, str]]:
 
 
 def validate_entry(entry: dict) -> dict:
-    name   = entry.get("name", "Unknown")
-    ats    = entry.get("ats", "")
-    slug   = entry.get("slug", "") or ""
-    source = entry.get("source", "favorites")
+    name        = entry.get("name", "Unknown")
+    ats         = entry.get("ats", "")
+    slug        = entry.get("slug", "") or ""
+    careers_url = entry.get("careers_url", "") or ""
+    source      = entry.get("source", "favorites")
 
     result = {
         "name":     name,
         "source":   source,
-        "status":   None,      # "ok" | "empty" | "failed" | "misconfigured" | "chrome"
+        "status":   None,      # "ok" | "empty" | "failed" | "misconfigured" | "chrome" | "ok_via_url"
         "ats":      ats,
         "slug":     slug,
         "job_count": None,
         "suggestion": None,
         "error":    None,
     }
+
+    # Path 1 (v2.5.0): if careers_url is provided, derive ats+slug deterministically
+    # from URL pattern. Bypasses the slow slug-variant probe loop entirely.
+    # If URL maps to a supported ATS, override entry's ats/slug with parsed values.
+    if careers_url:
+        url_resolved = ats_from_url(careers_url)
+        if url_resolved is not None:
+            url_ats, url_slug = url_resolved
+            ats  = url_ats
+            slug = url_slug
+            result["ats"]  = ats
+            result["slug"] = slug
+            result["resolved_via"] = "url"
+        else:
+            # URL provided but unrecognized (e.g. workable.com, lever was matched but
+            # we may add personio/etc later) — keep going with entry's ats/slug if any
+            result["resolved_via"] = "url_unrecognized_fallback_to_entry_ats"
 
     # Chrome-only entry — nothing to probe via API
     if ats == "chrome":
@@ -116,7 +155,7 @@ def validate_entry(entry: dict) -> dict:
     # Missing required fields
     if not ats or not slug:
         result["status"] = "misconfigured"
-        result["error"]  = "Missing 'ats' or 'slug' field"
+        result["error"]  = "Missing 'ats'/'slug' field and no parseable careers_url"
         return result
 
     if ats not in ("ashby", "greenhouse", "lever"):

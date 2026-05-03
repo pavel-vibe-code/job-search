@@ -4,6 +4,52 @@ All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Chang
 
 ---
 
+## [2.5.0] — 2026-05-03
+
+### Validator URL-dispatch (fixes name-based "uncertain" misclassifications)
+
+`scripts/validate-jobs.py` was the source of a real bug surfaced by the v2.4.0 cloud-routine fire: companies whose listings had unambiguously-Greenhouse or unambiguously-Ashby URLs (e.g. `job-boards.greenhouse.io/<co>/...`) were being marked uncertain because the validator only did **name-index lookup** (companies.json + favorites.json by lowercased company name). If the entry was missing or had `ats: "skip"`, the listing got dropped to uncertain even though the URL itself revealed the ATS.
+
+- **New** — `ats_from_url()` in `validate-jobs.py`. Regex matches against known ATS host patterns (`jobs.ashbyhq.com`, `job-boards.ashbyhq.com`, `boards.greenhouse.io`, `job-boards.greenhouse.io`, `jobs.lever.co`, `www.comeet.com/jobs/...`). Returns `(ats, slug)` deterministically. Used as the **primary** dispatch signal; name-index lookup is the fallback.
+- **Fixed** — companies/favorites precedence inconsistency. Pre-v2.5.0, `validate-jobs.py` had favorites overriding companies (last-writer-wins), while `fetch-and-diff.py` had companies overriding favorites (companies-wins). Same data, opposite behavior. Unified to **companies-wins** in both scripts.
+- **Improved** — uncertain reason codes split. Was a single string `no_api_for_ats_or_company_unknown` conflating two distinct failure modes. Now: `company_name_not_in_index` (data-hygiene problem in user's favorites) vs `ats_unsupported:<value>` (code limitation; e.g. lever, workable, personio). Each candidate's `url` field is also preserved in the uncertain output for diagnostics.
+- **New** — 14 unit tests in `tests/test_validate_jobs.py` pinning URL-pattern behavior across both classic and new-subdomain forms (`jobs.ashbyhq.com` AND `job-boards.ashbyhq.com`, `boards.greenhouse.io` AND `job-boards.greenhouse.io`).
+
+### Favorites schema gains `careers_url` field
+
+`config/favorites.json` entries can now carry an optional `careers_url` field. When present, `validate-favorites.py` derives ATS+slug deterministically from the URL, bypassing the slow slug-variant-probing loop entirely. Faster, miss-proof, forward-compatible (URL preserved even for ATS types not yet supported by the fetcher — when support is added later, no reconfiguration needed).
+
+The wizard rewrite in v2.5.1 will make this the default capture mechanism: user provides URL when adding favorites; ATS detected immediately.
+
+```json
+{
+  "name": "Together AI",
+  "slug": "togetherai",
+  "ats": "greenhouse",
+  "careers_url": "https://job-boards.greenhouse.io/togetherai",
+  "source": "user_added"
+}
+```
+
+### Typed `hard_exclusions` schema defined (consumers in v2.5.1)
+
+`profile.json` may now include a `hard_exclusions` block — typed exclusion rules that downstream code applies deterministically at Pass 1, before any LLM scoring. Schema documented in `ARCHITECTURE.md` §7.2. Five rule types defined:
+
+- `country_lock` — `{reject_outside: ["EU", "Czech Republic"]}`
+- `language_required` — `{user_languages: [...], reject_if_other_required: true}`
+- `title_pattern` — `{reject_if_contains: [...], unless_also_contains: [...]}`
+- `seniority_floor` — `{minimum_level: "senior_ic"}`
+- `remote_country_lock` — `{eligible_remote_regions: ["EU"]}` (reject "Remote — US only" style listings)
+
+Code consumers (fetch-and-diff and compile-write reading the typed block) ship in v2.5.1 alongside the wizard rewrite that generates them. v2.5.0 ships only the schema + documentation. Existing profiles without `hard_exclusions` continue to use legacy `exclusion_rules` free-text — full backward compatibility.
+
+### Versions
+
+- Plugin: 2.4.0 → 2.5.0
+- Tests: 150 → 164
+
+---
+
 ## [2.4.0] — 2026-05-01
 
 ### Project-scoped layout (skills auto-register in cloud Routines)

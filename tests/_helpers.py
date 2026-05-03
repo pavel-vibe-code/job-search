@@ -18,6 +18,17 @@ def load_fad():
     return mod
 
 
+def load_script(filename: str, module_name: str = None):
+    """Load any scripts/*.py module by filename. Used for scripts beyond fetch-and-diff."""
+    path = os.path.join(PLUGIN_ROOT, "scripts", filename)
+    spec = importlib.util.spec_from_file_location(
+        module_name or filename.replace("-", "_").replace(".py", ""), path
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def fixture_path(name: str) -> str:
     return os.path.join(FIXTURES_DIR, name)
 

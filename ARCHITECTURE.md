@@ -330,7 +330,9 @@ The setup wizard collects criteria + priorities (high/medium/low) in plain Engli
 
 ### 7.2 Hard exclusions (applied BEFORE scoring)
 
-Defined in `profile.json[exclusion_rules]`:
+Two coexisting forms — legacy free-text and typed schema:
+
+**Legacy (still supported):** `profile.json[exclusion_rules]`, an array of free-text rules interpreted by the compile-write agent at scoring time.
 
 ```json
 [
@@ -341,6 +343,23 @@ Defined in `profile.json[exclusion_rules]`:
   "Located outside the EU, OR in the UK or Ireland"
 ]
 ```
+
+**Typed schema (introduced v2.5.0):** `profile.json[hard_exclusions]`, a structured block consumers can apply deterministically at Pass 1 (fetch-and-diff) before any LLM scoring.
+
+```json
+{
+  "schema_version": 1,
+  "rules": [
+    {"type": "country_lock", "reject_outside": ["EU", "Czech Republic"]},
+    {"type": "language_required", "user_languages": ["English"], "reject_if_other_required": true},
+    {"type": "title_pattern", "reject_if_contains": ["Marketing", "Sales", "Engineering Manager"], "unless_also_contains": []},
+    {"type": "seniority_floor", "minimum_level": "senior_ic"},
+    {"type": "remote_country_lock", "eligible_remote_regions": ["EU", "Czech Republic"], "_note": "Reject 'Remote — US-only' style listings; allow 'Remote — EU/Anywhere'."}
+  ]
+}
+```
+
+Why two forms: existing profiles (pre-v2.5) only have `exclusion_rules`, so consumers fall back to it when `hard_exclusions` is absent or empty. New profiles (v2.5+ wizard) generate `hard_exclusions` as the primary form. Eventually free-text `exclusion_rules` is for nuanced judgment-call rules that still need LLM interpretation; structured types handle deterministic filters.
 
 Compile-write applies these first; matched jobs are dropped without scoring. Counts are reported in the run summary so the user can sanity-check the filter.
 
