@@ -205,62 +205,142 @@ When BOTH typed and legacy forms are present, both are honored — typed handles
 
 ### Step 3.v3 — LLM-judged categorical scoring (when `cv_json` present)
 
-For each survivor, build a single LLM scoring prompt and parse the response. The prompt structure:
+For each survivor, build a single LLM scoring prompt and parse the response. **Evidence-grounded reasoning is mandatory**: every match/concern/gap must cite a specific JD passage AND a specific profile field — surface keyword overlap is not enough. Bucket assignment must be defensible from the cited evidence.
+
+The prompt structure:
 
 ```
-You are scoring a job listing against a candidate's profile and CV.
+You are scoring a job listing against a candidate's profile and CV. Your goal:
+produce a categorical verdict (High/Mid/Low) grounded in CONCRETE EVIDENCE
+from the JD's requirements section AND the candidate's profile/CV.
 
-Profile narrative (intent — what the user wants/avoids):
+Use deep reasoning. DO NOT surface-match keywords (e.g. "AI Solutions Architect
+in profile role_types[ai-fde]" is too shallow — it's a label match, not an
+analysis). The discriminating signal lives in the JD's requirements section
+and how concretely the candidate's experience addresses it.
+
+═══════════════════════════════════════════════════════════════════════
+CANDIDATE PROFILE
+═══════════════════════════════════════════════════════════════════════
+
+Profile narrative (intent — wants, avoids, aspirations):
 {profile.context}
 
-CV — structured (substance):
+CV — structured (substance — work history, achievements, skills):
 {profile.cv_json}
 
 Scoring instructions (optional hints):
 {profile.scoring.instructions or "(none)"}
 
-Few-shot examples from this user's prior labels (when available; ship empty in v3.0-rc1):
+Few-shot examples from this user's prior labels (when available):
 {few_shot_examples or "(none yet)"}
 
-This listing:
-  Title:    {candidate.title}
-  Company:  {candidate.company}
-  Location: {candidate.location}
-  URL:      {candidate.url}
-  Description:
-  {candidate.description}
+═══════════════════════════════════════════════════════════════════════
+JOB LISTING
+═══════════════════════════════════════════════════════════════════════
 
-Task — produce a structured comparison:
-  1. List `match:` factors — profile attributes the JD specifically calls for or values.
-  2. List `concern:` factors — profile attributes that conflict with JD requirements.
-  3. List `gap:` factors — JD requirements that the profile doesn't cover.
-  4. Cite specific profile fields where possible (e.g.
-     "match: cv_json.experience[0].achievements 'AI deflection 50% YoY'
-      directly addresses JD's 'experience with AI-driven cost reduction'").
-  5. Weigh: match density relative to severity of concerns/gaps.
-  6. Assign verdict:
-     - High: matches dominate AND no critical concerns
-     - Mid:  matches and concerns are mixed OR JD is too sparse to confidently assess
-     - Low:  few matches OR major requirements unmet
-  7. Estimate confidence (high / medium / low).
+Title:       {candidate.title}
+Company:     {candidate.company}
+Location:    {candidate.location}
+URL:         {candidate.url}
 
-Output JSON only:
+Full description (read the REQUIREMENTS section carefully):
+{candidate.description}
+
+═══════════════════════════════════════════════════════════════════════
+TASK
+═══════════════════════════════════════════════════════════════════════
+
+Step 1 — Decompose the JD.
+Identify the requirements section (responsibilities, qualifications, must-haves,
+nice-to-haves, "about you", "what you'll do"). From it, extract:
+  - **Must-haves**: required skills, experience, technologies, certifications
+  - **Nice-to-haves**: preferred but not required signals
+  - **Specific experience patterns**: e.g. "scaled team from X to Y", "managed
+    P&L of $N", "shipped product to N customers", "built support automation
+    at <scale>"
+  - **Seniority signals**: years, scope (manager/IC/manager-of-managers), level
+  - **Domain/industry context**: B2B SaaS, AI-native, regulated, enterprise,
+    PLG, etc.
+  - **Unique asks**: anything specific the role's writer emphasized — these
+    are the highest-signal phrases. Often single sentences that distinguish
+    THIS role from a generic version.
+
+Step 2 — Evidence-grounded comparison.
+For each JD signal, find evidence (or lack of it) in the candidate's profile/CV.
+
+  match:    JD requirement IS substantively addressed by profile
+  concern:  Profile attribute CONFLICTS with JD requirement
+  gap:      JD requirement is NOT addressed by profile
+
+Each factor MUST follow this format:
+  "match: <JD quote ≤100 chars> ↔ <specific profile field path or quoted CV passage>"
+  "concern: <JD quote ≤100 chars> ↔ <specific profile field path>"
+  "gap: <JD quote ≤100 chars> ↔ (not in profile)"
+
+Examples of good factors (specific, evidence-grounded):
+  "match: 'experience scaling support orgs from 20 to 100 FTE' ↔
+   cv_json.experience[1].key_achievements[0] 'scaled Wrike support team
+   3x to 70 FTE over 8 years'"
+
+  "concern: 'must have published technical writing' ↔
+   cv_json.skills.* lists no writing/publishing — gap risk"
+
+  "gap: 'Series A stage, 0→1 GTM motion' ↔
+   (cv_json.career_signals.industry_focus = 'B2B SaaS Series B+'; not a
+   match for early-stage 0→1)"
+
+Examples of BAD factors (rejected — too shallow):
+  ✗ "match: AI Solutions Architect in role_types[ai-fde]"
+    (label-match only, no JD passage cited, no specific evidence)
+  ✗ "match: profile mentions customer success"
+    (no JD passage, no specific profile field)
+  ✗ "match: enterprise alignment"
+    (vague — no quote, no field)
+
+Step 3 — Weigh.
+Match density vs. severity of concerns/gaps. Critical concerns (seniority
+mismatch, missing must-have, deal-breaker tradeoff) downgrade aggressively.
+Sparse JDs (less than ~3 substantive requirements) default to Mid — too
+little signal for High.
+
+Step 4 — Verdict.
+  HIGH: 4+ substantive matches at the requirements level, NO critical concerns,
+        rationale defensible from JD quotes alone. The candidate's profile
+        substantively addresses what the role asks for.
+  MID:  Mixed signal — some real matches but real concerns; OR JD too sparse
+        for confident High; OR fit plausible but key signals missing.
+  LOW:  Few requirements-level matches, OR major asks unmet, OR profile
+        trajectory misaligns with role's center of gravity.
+
+Step 5 — Output JSON only:
 {
   "verdict":     "High" | "Mid" | "Low",
-  "rationale":   "1-3 sentences explaining the bucket assignment",
-  "key_factors": ["match: ...", "match: ...", "concern: ...", "gap: ..."],
+  "rationale":   "2-4 sentences. MUST reference at least one specific JD
+                  requirement and one specific profile field. Explain why
+                  this verdict, not what the role generically is.",
+  "key_factors": [
+    "match: <JD quote> ↔ <profile field>",
+    "match: ...",
+    "concern: ...",
+    "gap: ..."
+  ],
   "confidence":  "high" | "medium" | "low"
 }
 ```
 
 **Implementation guidance:**
 
-- Use Claude Sonnet 4.6 (default) or Haiku 4.5 (cost-optimized) — set per `profile.scoring.instructions` if user specified, else default.
-- Use Anthropic prompt caching for the constant profile section: caching the (narrative + cv_json + scoring.instructions + few_shot_examples) block dramatically reduces cost across N candidates in one run. Cache control: `{"type": "ephemeral"}` on the profile content block.
-- Use `temperature=0` for stability across runs.
-- Parse the response as JSON. If parsing fails, log the raw response and assign `Mid` with a confidence=`low` and rationale noting the parse failure — never fail the run on a single LLM hiccup.
+- **Default model: Claude Opus 4.7 (`claude-opus-4-7`)** — strongest reasoning + nuance. Significantly better than Sonnet at multi-criteria evaluation. Cost is meaningfully higher (~5x per call vs Sonnet) but with prompt-caching of the constant profile section, marginal cost on calls 2-N amortizes well.
+- **Enable extended thinking** for each scoring call — this is what makes the JD-requirements decomposition robust. Use `thinking: {type: "enabled", budget_tokens: 4000}` (or similar — adjust based on JD length and complexity).
+- **Override via `profile.scoring.instructions`**: if user writes *"use sonnet for cost"* or *"use haiku"*, honor that override. Otherwise Opus.
+- **Anthropic prompt caching** is mandatory for the constant profile section (narrative + cv_json + scoring.instructions + few_shot_examples). Cache control: `{"type": "ephemeral"}` on the profile content block. Across ~200 candidates this is the difference between $30 and $150 per run on Opus.
+- **temperature=0** for stability across runs. Categorical decisions should be sticky.
+- **Parse the response as JSON.** If parsing fails, log the raw response and assign `Mid` with `confidence: "low"` and rationale noting the parse failure — never fail the run on a single LLM hiccup. Track parse-failure count in run summary so we can detect prompt drift.
 
-**Bucket assignment is match-density-driven, not holistic-vibe.** The LLM enumerates factors first, then weighs. Sparse JDs default to Mid. Critical concerns (e.g. seniority mismatch) downgrade from pure match counting.
+**Quality bar:** the `rationale` and `key_factors` should make the verdict defensible to a reader who has only the JD + profile in front of them. If you (the agent) wrote a rationale that could equally apply to any role with the same title, the rationale is too generic — re-prompt or downgrade confidence.
+
+**Bucket assignment is match-density-driven, evidence-grounded, not holistic-vibe.** The LLM enumerates factors first with quote-evidence, then weighs. Sparse JDs default to Mid. Critical concerns downgrade aggressively from pure match counting.
 
 ### Step 3.legacy — Structured rubric (when no `cv_json`)
 

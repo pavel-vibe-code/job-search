@@ -4,6 +4,50 @@ All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Chang
 
 ---
 
+## [3.0.2] — 2026-05-03
+
+### v3 LLM scoring quality lift — Opus + JD-requirements-focused prompt
+
+End-to-end v3.0.0 testing surfaced a real issue: while the architecture works (categorical buckets, hard exclusions firing, no irrelevant choices in tracker), the scoring **rationales were too shallow**. Examples like *"match: AI Solutions Architect in profile role_types[ai-fde]"* are label-overlap matches, not analysis. The LLM was reading both inputs but not doing the substantive comparison the architecture promised.
+
+Two corrective changes:
+
+**1. Default model: Sonnet 4.6 → Opus 4.7 with extended thinking.** Opus is meaningfully stronger at multi-criteria evaluation and nuanced JD-requirements decomposition. Extended thinking (`{type: "enabled", budget_tokens: 4000}`) gives the model space to actually decompose the JD's requirements section and trace evidence — the kind of reasoning that produces *"match: 'must have scaled support 20→100 FTE' ↔ cv_json.experience[1].key_achievements 'scaled Wrike support team 3x to 70 FTE'"* instead of *"match: customer success keyword"*.
+
+Cost: ~5x per scoring call vs Sonnet. Prompt-caching of the constant profile section (which was already mandatory for v3) makes calls 2-N much cheaper, so end-to-end run cost is more like 3-4x not 5x. Users who want Sonnet/Haiku for cost can override via `profile.scoring.instructions: "use sonnet for cost"`.
+
+**2. Restructured prompt: JD-requirements decomposition + evidence-grounded factors.** The previous prompt asked the LLM to "list match: / concern: / gap: factors" — open enough that label-match satisfied the instruction. The new prompt:
+
+- Explicitly says "do NOT surface-match keywords" with examples of bad and good factor formats
+- Adds a Step 1: **Decompose the JD** — extract must-haves, nice-to-haves, specific experience patterns, seniority signals, **unique asks** (the highest-signal phrases that distinguish THIS role from a generic version)
+- Mandates factor format: `"match: <JD quote ≤100 chars> ↔ <specific profile field path or CV passage>"` — every match must cite both sides
+- Provides reject-examples (label-only, no quote, vague) to guide the model away from shallow output
+- Defends quality: rationale must be defensible to someone who has only the JD + profile in front of them, not generically applicable to any role with the same title
+
+### Implementation details
+
+- `profile.scoring.instructions` accepts model overrides as plain English ("use sonnet for cost", "use haiku"). Default is Opus.
+- Prompt caching unchanged from v3.0-rc1 — still mandatory for the constant profile section.
+- Parse-failure handling unchanged: log + assign Mid with confidence:low.
+- New: track parse-failure count in run summary so prompt drift is detectable.
+
+### Cost framing
+
+A typical week with ~200 candidates surviving hard exclusions:
+- Sonnet 4.6 (v3.0.0-rc1 default): ~$5–7/run
+- **Opus 4.7 (v3.0.2 default): ~$20–30/run** — higher rationale quality
+- Haiku 4.5 (cost-conservative override): ~$1–2/run — degraded quality
+
+For weekly Routines, $20-30/week ≈ $80-120/month. If quality justifies it, fine; if not, override to Sonnet.
+
+### Versions
+
+- Plugin: 3.0.0 → 3.0.2
+- Tests: 164 (no test changes — agent prompt edits only)
+- Skipped: 3.0.1 (reserved for the queued token-tracking work; that ships with first non-cosmetic infra change)
+
+---
+
 ## [3.0.0] — 2026-05-03
 
 ### Notion-feedback learning loop
