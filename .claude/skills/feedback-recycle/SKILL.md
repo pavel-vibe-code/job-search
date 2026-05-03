@@ -24,7 +24,16 @@ Both are how the system learns without requiring the user to manually re-edit pr
 Inputs:
 
 - **Profile path** — `/tmp/profile.json` (cloud) or `./config/profile.json` (local). Determined by `state/.setup_complete[deployment_mode]`.
-- **Tracker DB ID** — read from `./state/cached-ids.json[tracker_database_id]`.
+- **Tracker DB ID** — **DO NOT** trust `state/cached-ids.json` blindly. The cache file is per-installation (your laptop's cache and the cloud Routine container's cache drift independently), and stale IDs lead to querying the wrong DB. **Run `notion-api.py discover` first** to refresh the cache, then read the freshly-resolved ID:
+
+  ```bash
+  python3 ./scripts/notion-api.py discover \
+    --config     ./config/connectors.json \
+    --cache-file ./state/cached-ids.json
+  ```
+
+  This ensures cached-ids reflects what's actually in the user's Notion workspace right now. Pre-v3.0.3 versions of this skill skipped this step and queried whatever ID happened to be cached — surfacing as "stale tracker ID, missing labels" errors when DBs had been recreated or migrated.
+
 - **Few-shot examples store path:**
   - Local mode: `./state/few_shot_examples.json` (gitignored).
   - Cloud mode: a dedicated Notion page (created at first run; ID stored in `cached-ids.json[few_shot_examples_page_id]`).
@@ -33,7 +42,7 @@ Query the tracker for entries where:
 - `Match Quality` is set (i.e. user labeled it)
 - `Recycled` is unchecked (i.e. we haven't processed this label yet)
 
-Use `notion-api.py query-database --filter` (api_token mode) or `notion-search` (mcp mode).
+Use `notion-api.py query-database --filter` (api_token mode) or `notion-search` (mcp mode). The query returns a `properties_summary` for each row that includes ALL relevant property types — `rich_text` (Feedback Comment, Key Factors, Reasoning), `checkbox` (Recycled), `select` (Match, Match Quality, Status). Pre-v3.0.3 versions stripped rich_text/checkbox/multi_select "for brevity" — that's been fixed; if you're invoking this skill on an older script, you'll need to either upgrade or do a custom property query.
 
 If zero results: print *"No new feedback to recycle. Run when you've labeled some entries in the tracker."* and exit.
 
@@ -111,12 +120,27 @@ Append these to the few-shot store. Cap the store at ~10 examples (oldest evicte
 
 In cloud mode: write the few-shot store as a JSON code block in the dedicated Notion page (auto-create the page on first run if `cached-ids[few_shot_examples_page_id]` is unset).
 
-## Step 5 — Mark recycled, update profile
+## Step 5 — Mark recycled, update profile, record run timestamp
 
 For every tracker entry processed:
 - Set `Recycled: true` (the v3.0.0 schema's checkbox column)
 
 This prevents double-counting in future recycle runs.
+
+**Also write `state/last_recycle.json`** with the run timestamp + counts:
+
+```json
+{
+  "timestamp":           "2026-05-03T14:32:00Z",
+  "entries_processed":   N,
+  "anti_patterns_added": M,
+  "few_shot_added":      K
+}
+```
+
+This file gates the orchestrator's optional Pass 6 auto-trigger (run-job-search SKILL.md): Pass 6 fires only if last_recycle is missing or > 7 days old. Without this stamp, every Routine fire would invoke recycle even when there's nothing new — wasteful.
+
+File is gitignored (per-installation; `state/` directory is already in .gitignore).
 
 Profile update summary printed:
 

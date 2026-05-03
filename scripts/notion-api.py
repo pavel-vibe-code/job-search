@@ -402,7 +402,13 @@ def _resolve_parent(parent_id: str, parent_type: str) -> dict:
 
 
 def _summarise_properties(props: dict) -> dict:
-    """Compact summary of a Notion page's properties (avoid logging entire blobs)."""
+    """Compact summary of a Notion page's properties.
+
+    Pre-v3.0.3 omitted rich_text/checkbox/multi_select for brevity, which broke
+    feedback-recycle: it needs Feedback Comment (rich_text), Key Factors
+    (rich_text), Recycled (checkbox), Match Quality (select). The "for brevity"
+    rationale predated v3 schemas where those fields are load-bearing.
+    """
     summary = {}
     for name, val in props.items():
         t = val.get("type")
@@ -419,7 +425,16 @@ def _summarise_properties(props: dict) -> dict:
         elif t == "date":
             d = val.get("date")
             summary[name] = (d or {}).get("start")
-        # rich_text, multi_select, etc. — omit for brevity
+        elif t == "rich_text":
+            rt = val.get("rich_text", [])
+            summary[name] = "".join(e.get("text", {}).get("content", "") for e in rt)
+        elif t == "checkbox":
+            summary[name] = val.get("checkbox")
+        elif t == "multi_select":
+            summary[name] = [s.get("name") for s in val.get("multi_select", [])]
+        elif t == "status":
+            sel = val.get("status")
+            summary[name] = sel.get("name") if sel else None
     return summary
 
 

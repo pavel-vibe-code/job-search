@@ -4,6 +4,40 @@ All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Chang
 
 ---
 
+## [3.0.3] — 2026-05-03
+
+### feedback-recycle hardening + Pass 6 auto-trigger
+
+First end-to-end test of `recycle feedback` (after the v3.0.0 ship) surfaced three issues. All fixed.
+
+**Issue 1: `notion-api.py _summarise_properties()` stripped rich_text and checkbox values "for brevity".** Pre-v3 those omissions were fine; v3 schemas made them load-bearing — Feedback Comment, Key Factors, Reasoning, Recycled all got dropped from query summaries. The recycle skill couldn't see the data it needed and had to write a custom Python helper at runtime to query directly. Bug surfaced by user during first recycle invocation; fix is a small additive patch.
+
+- Fixed — `scripts/notion-api.py` `_summarise_properties()` now handles `rich_text`, `checkbox`, `multi_select`, and `status` types alongside the existing `title` / `number` / `select` / `url` / `date` cases. Comment block updated to explain why "for brevity" was wrong post-v3.
+
+**Issue 2: feedback-recycle blindly trusted `cached-ids.json` for tracker DB ID.** Same recycle invocation discovered the cached ID was stale (different from the actual current Job Tracker DB). The agent self-healed via discover, but only because the v2.3 self-healing discovery layer caught the miss. The skill should be defensive about this from the start.
+
+- Fixed — `.claude/skills/feedback-recycle/SKILL.md` Step 1 now mandates `notion-api.py discover` as the first action, refreshing cached-ids.json before any tracker query. Eliminates the dual-state risk between local and cloud cached-ids.
+
+**Issue 3: feedback-recycle had no auto-trigger from the orchestrator** — only manual invocation worked. v3.0.0 documented this as future work; v3.0.3 implements it.
+
+- New — `.claude/skills/run-job-search/SKILL.md` Pass 6 (optional) invokes feedback-recycle after Pass 5 with a 3-condition gate:
+  1. `deployment_mode == "cloud"` (local users invoke manually)
+  2. `profile.cv_json` present (legacy profiles use structured rubric, no recycle path)
+  3. `state/last_recycle.json` is missing OR has timestamp > 7 days ago
+- New — feedback-recycle Step 5 now writes `state/last_recycle.json` with timestamp + counts, enabling the gate.
+- `.gitignore` — `state/last_recycle.json` and `state/few_shot_examples.json` added.
+
+### Why "run in same Routine context" matters
+
+User insight that surfaced the design improvement: feedback-recycle reads tracker entries via the Notion API, but it needs the right tracker DB ID to query. `cached-ids.json` is per-installation — your laptop's cache and the cloud Routine container's cache drift independently. Running recycle locally when the routine is cloud-mode means the local cache may point at a stale DB. The defensive `discover` (Issue 2 fix) makes both contexts robust; the Pass 6 auto-trigger (Issue 3 fix) makes the cloud context the primary path.
+
+### Versions
+
+- Plugin: 3.0.2 → 3.0.3
+- Tests: 164 (no test changes; bug fix in notion-api.py is a property-summary helper that's not directly unit-tested today)
+
+---
+
 ## [3.0.2] — 2026-05-03
 
 ### v3 LLM scoring quality lift — Opus + JD-requirements-focused prompt

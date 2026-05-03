@@ -391,6 +391,34 @@ If newly written jobs list is empty AND no static notifications AND no external 
 
 The fallback writes preserve everything the user would have read in Notion; the run exits 0 so the Routine doesn't reschedule a retry — the sticky summary warning is the human signal to investigate.
 
+### Pass 6 — Feedback recycle (optional, v3.0.3+)
+
+After Pass 5 completes successfully, optionally invoke the **feedback-recycle skill** to process any user-labeled tracker entries (Match Quality + Feedback Comment) since the last cycle. This converts disagreements between LLM verdict and user verdict into anti-patterns + few-shot examples that improve subsequent Pass 3 scoring runs.
+
+**Gating logic:**
+
+```python
+# Only run Pass 6 if all conditions are met
+should_recycle = (
+    deployment_mode == "cloud"  # local users invoke manually when ready
+    and profile_has_cv_json     # legacy profiles use structured rubric, no recycle
+    and (last_recycle_age_days >= 7 or last_recycle_missing)  # don't recycle every fire
+)
+```
+
+State tracking:
+- `./state/last_recycle.json` is written by feedback-recycle on every successful run with a timestamp.
+- Pass 6 reads this file. Missing or older than 7 days → trigger.
+- File is gitignored (per-installation, like cached-ids.json).
+
+If gating allows: invoke feedback-recycle skill. The skill self-handles "no new labels" gracefully (prints message and exits without writes), so Pass 6 invocation is safe even when there's nothing to do.
+
+If gating blocks: skip silently. The user can always invoke `recycle feedback` manually when they have new labels.
+
+**Why this is Pass 6, not Pass 5.5 or pre-Pass-1:** the recycle should run AFTER scoring and BEFORE the next fire. Running it within the same Routine context (rather than in a separate local Claude Code session) avoids the `cached-ids.json` drift problem — the cache the Routine just used to write entries is the same cache the recycle reads to find them. No dual-state risk.
+
+**Manual invocation always works** regardless of Pass 6 gating. The user can run `recycle feedback` locally any time; if local cached-ids drifts from cloud, the skill's defensive `discover` (Step 1) handles it.
+
 ## Output
 
 ```
