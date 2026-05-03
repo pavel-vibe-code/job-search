@@ -25,5 +25,12 @@
   "Date Added":       {"date": {}},
   "Why Fits":         {"rich_text": {}},
   "Reasoning":        {"rich_text": {}},
-  "Key Factors":      {"rich_text": {}}
+  "Key Factors":      {"rich_text": {}},
+  "Match Quality":    {"select": {"options": [
+    {"name": "Great",  "color": "green"},
+    {"name": "OK",     "color": "yellow"},
+    {"name": "Bad",    "color": "red"}
+  ]}},
+  "Feedback Comment": {"rich_text": {}},
+  "Recycled":         {"checkbox": {}}
 }

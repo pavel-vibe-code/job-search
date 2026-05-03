@@ -4,6 +4,81 @@ All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Chang
 
 ---
 
+## [3.0.0] — 2026-05-03
+
+### Notion-feedback learning loop
+
+Closes the v3 architectural goal: user labels in Notion → automated profile updates → improved scoring on next run, without requiring the user to hand-edit profile rules.
+
+The mechanism: tracker entries gain user-feedback columns (`Match Quality`: Great/OK/Bad — same vocabulary as LLM `Match` for clean comparison; `Feedback Comment`: free text). A new `feedback-recycle` skill reads labels since last cycle, prioritizes **disagreements** between LLM and user, and turns them into (a) anti-patterns appended to profile, (b) few-shot examples included in the next Pass 3 LLM scoring prompt for generalization.
+
+### Tracker DB schema additions
+
+- **`Match Quality`** (select: `Great` / `OK` / `Bad`) — user-labeled feedback. Vocabulary matches `Match` (LLM verdict) intentionally — when `Match ≠ Match Quality` it's a disagreement, the highest-leverage signal for the recycle pipeline.
+- **`Feedback Comment`** (rich text) — user explanation. Read by recycle skill to extract rationale.
+- **`Recycled`** (checkbox) — set to true once feedback-recycle has processed this label. Prevents double-counting on subsequent runs.
+
+### New skill: `feedback-recycle`
+
+`.claude/skills/feedback-recycle/SKILL.md` — six-step pipeline:
+
+1. Read tracker entries with `Match Quality` set and `Recycled` unchecked
+2. Categorize each by agreement / disagreement (with strong-disagreement priority)
+3. Synthesize **anti-patterns** from rejection clusters (3+ Bad entries sharing a pattern → rule added to `profile.context` with user approval)
+4. Curate **few-shot examples** (3-5 representative `{job, llm_verdict, user_label, comment, lesson}` quads stored in `state/few_shot_examples.json` (local) or a dedicated Notion page (cloud), capped at 10)
+5. Mark each entry `Recycled = true`
+6. Print summary
+
+The few-shot examples are the highest-leverage piece. They get included in every subsequent Pass 3 LLM scoring prompt — the LLM generalizes from concrete labeled cases without requiring user to hand-write rules.
+
+### Disagreement signal hierarchy
+
+| LLM `Match` | User `Match Quality` | Signal strength |
+|---|---|---|
+| High | Bad | **Strongest** — LLM said hot, user rejected |
+| Low | Great | **Strongest** — LLM rejected, user wants |
+| High/Mid/Low | (matches user label) | Confirmation — calibration check |
+| High | OK / Mid | OK | Mild — gradient adjustment |
+
+The recycle skill prioritizes strong-disagreements when synthesizing anti-patterns and few-shot examples.
+
+### Auto-trigger integration (v3.0.0+)
+
+The orchestrator's `run-job-search` skill can optionally invoke `feedback-recycle` after Pass 5 (gated on cloud mode + ≥7 days since last cycle). Manual invocation always works regardless of the auto-trigger gate. Local users invoke explicitly: *"recycle feedback"*, *"update profile from labels"*.
+
+### Architectural completeness
+
+v3.0.0 closes the loop:
+
+```
+Pass 1: hard exclusions + broad role-bucket pre-filter (cheap, deterministic)
+Pass 2: live/uncertain/closed validation (v2.5.2 envelope)
+Pass 3: LLM-judged categorical (v3.0-rc1) WITH few-shot examples from feedback (v3.0.0)
+Pass 4: state persistence
+Pass 5: hot-list digest = High bucket (v3.0-rc1)
+Pass 6: feedback-recycle — anti-patterns + few-shot store updates (v3.0.0)
+```
+
+Each pass informs the next; the feedback loop closes the cycle. User effort: label tracker entries occasionally with Match Quality. System effort: everything else.
+
+### Versions
+
+- Plugin: 3.0.0-rc1 → 3.0.0
+- Tests: 164 (no test changes — schema + skill markdown only; LLM and Notion interactions can't be unit-tested locally)
+- Skills: run-job-search, setup, validate-favorites, recalibrate-scoring, **feedback-recycle (new)**
+
+### Migration from rc1
+
+Existing v3.0-rc1 tracker DBs need the three new columns added (`Match Quality`, `Feedback Comment`, `Recycled`). Two ways:
+- Manually add via Notion DB settings (each takes ~10 seconds)
+- Recreate tracker DB by deleting it and letting the orchestrator's `recreate_ok` discovery path rebuild it (only viable if the tracker is recently populated and you don't mind losing manually-added rows)
+
+### Migration from v2.x
+
+Profiles without `cv_json` continue using legacy structured rubric — no breaking change. To migrate to the v3 hybrid path, re-run setup wizard and opt into CV upload at Step 3.5.
+
+---
+
 ## [3.0.0-rc1] — 2026-05-03
 
 ### Hybrid LLM-judged categorical scoring (architectural shift)
