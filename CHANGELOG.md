@@ -4,6 +4,22 @@ All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Chang
 
 ---
 
+## [3.0.4] — 2026-05-03
+
+### Fix: `update-page --replace-content` failed without `--properties`
+
+Pre-v3.0.4 guard at the start of `cmd_update_page` rejected calls that passed only `--replace-content` because it built the PATCH payload from `--properties` and `--archive`, then errored on empty payload before checking content-replacement intent. This blocked feedback-recycle from updating the Notion profile page (content-only update — no metadata properties to PATCH) and forced a workaround in the user's session.
+
+- **Fixed** — `scripts/notion-api.py` `cmd_update_page` accepts any of three update modes: `--properties`, `--archive`, OR `--replace-content`. Skips the PATCH `/pages/<id>` call entirely when only content replacement was requested (the children-replace path uses `/blocks/<id>/children` separately). Final ok-response uses `args.page_id` as fallback when no PATCH body was returned.
+- Surfaced by user during second feedback-recycle test (continuing the session that produced v3.0.3).
+
+### Versions
+
+- Plugin: 3.0.3 → 3.0.4
+- Tests: 164 (no test changes; bug is in CLI argument handling not covered by current Python suite)
+
+---
+
 ## [3.0.3] — 2026-05-03
 
 ### feedback-recycle hardening + Pass 6 auto-trigger

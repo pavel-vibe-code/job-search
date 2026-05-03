@@ -446,14 +446,22 @@ def cmd_update_page(args, token):
         payload["properties"] = pack_properties(props_in)
     if args.archive:
         payload["archived"] = True
-    if not payload:
-        print(json.dumps({"error": "nothing to update — pass --properties or --archive"}), file=sys.stderr)
+    # Pre-v3.0.4 the guard rejected `update-page --replace-content` without
+    # `--properties` because it only checked `payload`. But --replace-content
+    # is a content-only update (delete children + append new blocks) that
+    # doesn't need a PATCH /pages call at all. Now: accept any of the three
+    # update modes, skip the PATCH if only --replace-content was requested.
+    if not payload and not args.replace_content:
+        print(json.dumps({"error": "nothing to update — pass --properties, --replace-content, or --archive"}), file=sys.stderr)
         sys.exit(3)
 
-    body, err, status = http_request("PATCH", f"/pages/{args.page_id}", token, payload)
-    if err:
-        print(json.dumps({"error": err, "status": status, "body": body}), file=sys.stderr)
-        sys.exit(1)
+    if payload:
+        body, err, status = http_request("PATCH", f"/pages/{args.page_id}", token, payload)
+        if err:
+            print(json.dumps({"error": err, "status": status, "body": body}), file=sys.stderr)
+            sys.exit(1)
+    else:
+        body, err, status = None, None, None
 
     # If --replace-content is set, delete existing children + append new
     if args.replace_content:
@@ -476,10 +484,12 @@ def cmd_update_page(args, token):
                 print(json.dumps({"error": "append_children_failed", "detail": aerr}), file=sys.stderr)
                 sys.exit(1)
 
+    # body is None when only --replace-content was requested (no PATCH made).
+    # Fall back to args.page_id + sensible defaults.
     print(json.dumps({
         "ok": True,
-        "id": body.get("id"),
-        "archived": bool(body.get("archived", False)),
+        "id": (body or {}).get("id", args.page_id),
+        "archived": bool((body or {}).get("archived", False)),
     }, indent=2))
 
 
