@@ -56,10 +56,11 @@ TIMEOUT_S      = 20
 # misses (typos, casing, "skip"-marked-but-jobs-still-fetched) but URL is
 # unambiguous. URL-based dispatch is the primary signal; name-index is fallback.
 ATS_URL_PATTERNS = [
-    (re.compile(r'^https?://(?:jobs|job-boards)\.ashbyhq\.com/([^/]+)'),     'ashby',      1),
-    (re.compile(r'^https?://(?:boards|job-boards)\.greenhouse\.io/([^/]+)'), 'greenhouse', 1),
-    (re.compile(r'^https?://jobs\.lever\.co/([^/]+)'),                        'lever',      1),
-    (re.compile(r'^https?://www\.comeet\.com/jobs/([^/]+)'),                  'comeet',     1),
+    (re.compile(r'^https?://(?:jobs|job-boards)\.ashbyhq\.com/([^/]+)'),                  'ashby',      1),
+    # Greenhouse: classic + new + EU subdomain (data residency for EU customers)
+    (re.compile(r'^https?://(?:boards|job-boards)(?:\.eu)?\.greenhouse\.io/([^/]+)'),     'greenhouse', 1),
+    (re.compile(r'^https?://jobs\.lever\.co/([^/]+)'),                                     'lever',      1),
+    (re.compile(r'^https?://www\.comeet\.com/jobs/([^/]+)'),                               'comeet',     1),
 ]
 
 
@@ -134,7 +135,7 @@ def fetch_active_ids_comeet(slug: str, company_id: str, careers_url: str) -> Tup
     return {str(p.get("uid") or p.get("id")) for p in positions if (p.get("uid") or p.get("id"))}, None
 
 
-def load_companies_index(plugin_root: str) -> Dict[str, dict]:
+def load_companies_index(companies_file: str, favorites_file: str) -> Dict[str, dict]:
     """Map company name (lowercased) → company config dict (with ats, slug, etc.).
 
     Precedence: companies.json wins on duplicate names — consistent with
@@ -143,14 +144,21 @@ def load_companies_index(plugin_root: str) -> Dict[str, dict]:
     where a job that fetched fine via companies.json's `ats: greenhouse` would
     get marked uncertain in validate via favorites.json's `ats: skip` for the
     same company.
+
+    Pre-v3.0.6 this function read paths hardcoded as `plugin_root/config/...`
+    — fine in local mode, but in cloud mode the user's actual favorites live
+    in Notion (hydrated to /tmp/favorites.json by orchestrator's P-4) while
+    plugin_root/config/favorites.json stays as the shipped template. Pass 1
+    used the hydrated data via fetch-and-diff's --favorites-file arg; Pass 2
+    silently used the template, so user's actual favorites (Parloa, Nebius,
+    JetBrains, Make, etc.) wouldn't be found and got marked
+    `company_name_not_in_index`. v3.0.6 makes the file paths explicit args
+    that the orchestrator passes per deployment mode.
     """
     idx: Dict[str, dict] = {}
     # Load favorites first, companies second — companies wins on duplicate.
-    for path in (
-        os.path.join(plugin_root, "config", "favorites.json"),
-        os.path.join(plugin_root, "config", "companies.json"),
-    ):
-        if not os.path.exists(path):
+    for path in (favorites_file, companies_file):
+        if not path or not os.path.exists(path):
             continue
         with open(path) as f:
             data = json.load(f)
@@ -177,10 +185,21 @@ def slug_for(candidate: dict, companies: Dict[str, dict]) -> Optional[Tuple[str,
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--candidates", required=True, help="Path to candidates JSON array")
-    p.add_argument("--plugin-root", required=True, help="Plugin root (for companies.json / favorites.json)")
+    p.add_argument("--plugin-root", required=True, help="Plugin root (used for default companies/favorites file paths if explicit args not given)")
+    p.add_argument("--companies-file", default=None,
+                   help="companies.json path. Default: <plugin-root>/config/companies.json. "
+                        "In cloud mode the orchestrator should pass /tmp/companies.json (Notion-hydrated).")
+    p.add_argument("--favorites-file", default=None,
+                   help="favorites.json path. Default: <plugin-root>/config/favorites.json. "
+                        "In cloud mode the orchestrator should pass /tmp/favorites.json (Notion-hydrated). "
+                        "Pre-v3.0.6 this defaulted hardcoded to plugin-root, causing user-added favorites "
+                        "in Notion to be invisible to Pass 2 (silently marking them company_name_not_in_index).")
     p.add_argument("--output", default="/tmp/validate-output.json", help="Where to write validation results")
     p.add_argument("--max-workers", type=int, default=10)
     args = p.parse_args()
+
+    companies_file = args.companies_file or os.path.join(args.plugin_root, "config", "companies.json")
+    favorites_file = args.favorites_file or os.path.join(args.plugin_root, "config", "favorites.json")
 
     with open(args.candidates) as f:
         candidates = json.load(f)
@@ -196,7 +215,7 @@ def main():
         print(json.dumps(out))
         return
 
-    companies = load_companies_index(args.plugin_root)
+    companies = load_companies_index(companies_file, favorites_file)
 
     # Group candidates by (ats, slug). One API call per group fetches the full
     # active-id set, against which we test every candidate in that group.

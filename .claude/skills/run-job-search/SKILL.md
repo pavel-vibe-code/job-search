@@ -223,9 +223,23 @@ Supported ATS types: `ashby`, `greenhouse`, `comeet`, `html_static`, `static_rol
 
 ### Pass 2 — URL Validation (validate-urls agent)
 
-Write the `candidates` array from Pass 1 to a file (e.g. `/tmp/pass2-candidates.json`), then invoke **validate-urls** with the path:
+Write the `candidates` array from Pass 1 to a file (e.g. `/tmp/pass2-candidates.json`), then invoke **validate-urls** with the path AND the same companies/favorites files Pass 1 used (NOT plugin_root defaults — see v3.0.6 note below):
 
-> "Run validate-jobs.py on `/tmp/pass2-candidates.json`. Returns live / closed / uncertain. Pass `live` AND `uncertain` forward to compile-write — uncertains get written to the tracker with `Status: Uncertain` so the user can spot-check them in Notion. Closed entries don't get passed (they're handled separately as removed_jobs from Pass 1's diff)."
+> "Run validate-jobs.py on `/tmp/pass2-candidates.json`, passing `--companies-file <same-as-Pass-1>` and `--favorites-file <same-as-Pass-1>`. Returns live / closed / uncertain. Pass `live` AND `uncertain` forward to compile-write — uncertains get written to the tracker with `Status: Uncertain` so the user can spot-check them in Notion. Closed entries don't get passed (they're handled separately as removed_jobs from Pass 1's diff)."
+
+**Cloud mode flag values:**
+```
+--companies-file /tmp/companies.json    (Notion-hydrated, same as Pass 1)
+--favorites-file /tmp/favorites.json    (Notion-hydrated, same as Pass 1)
+```
+
+**Local mode flag values (or omit for plugin_root defaults):**
+```
+--companies-file ./config/companies.json
+--favorites-file ./config/favorites.json
+```
+
+**Why this matters (v3.0.6 fix).** Pre-v3.0.6, `validate-jobs.py` hardcoded its index source to `plugin_root/config/{companies,favorites}.json`. In cloud mode that's the **shipped template** (generic Scaling Europe 50 sample data). The user's actual favorites live in Notion, hydrated to `/tmp/favorites.json` by P-4. Pass 1 used the hydrated data; Pass 2 used the template; user-added favorites (Parloa, Nebius, JetBrains, Make, etc.) silently became `company_name_not_in_index` in Pass 2 even though Pass 1 happily fetched their jobs. v3.0.6 makes the file paths explicit args; orchestrator passes the same paths to both passes.
 
 **Why uncertains now get written (v2.5.2):** Pre-v2.5.2, uncertains were dropped at this boundary — only `live` went forward. But Pass 4 still persisted their job IDs to state, which meant the next run's diff treated them as "seen" and they were silently consumed. User never saw them. Now uncertains travel with live to compile-write and land in the tracker with a distinct status, preserving review opportunity.
 

@@ -4,6 +4,39 @@ All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Chang
 
 ---
 
+## [3.0.6] — 2026-05-04
+
+### Fix: Pass 2 used the wrong favorites source in cloud mode
+
+User testing surfaced four entries (Parloa, Nebius, JetBrains, Make) that Pass 1 successfully fetched but Pass 2 marked `company_name_not_in_index`. Same data, opposite behavior. Root cause: `validate-jobs.py` hardcoded its index source to `plugin_root/config/{companies,favorites}.json` — the shipped template. In cloud mode the user's actual favorites live in Notion, hydrated to `/tmp/favorites.json` by orchestrator P-4. Pass 1 used the hydrated data via `fetch-and-diff.py --favorites-file`; Pass 2 silently used the template, so user-added favorites were invisible.
+
+- **Fixed** — `scripts/validate-jobs.py` accepts `--companies-file` and `--favorites-file` CLI args (matching `fetch-and-diff.py`'s interface). Defaults to `plugin_root/config/...` when not specified.
+- **Updated** — `.claude/skills/run-job-search/SKILL.md` Pass 2 invocation now passes the same files Pass 1 uses (`/tmp/companies.json` + `/tmp/favorites.json` in cloud mode).
+- Net: Pass 1 and Pass 2 always read from the same source-of-truth. Same data, same behavior.
+
+### URL patterns: EU Greenhouse subdomain coverage
+
+`job-boards.eu.greenhouse.io/<slug>/jobs/<id>` and `boards.eu.greenhouse.io/<slug>/jobs/<id>` are how Greenhouse serves data-residency-EU customers (Parloa, JetBrains, etc.). The pre-v3.0.6 regex `(boards|job-boards)\.greenhouse\.io` missed the `.eu.` segment.
+
+- **Fixed** — `scripts/validate-jobs.py` `ATS_URL_PATTERNS` now matches `(boards|job-boards)(?:\.eu)?\.greenhouse\.io`. Same regex change recommended for `validate-favorites.py` (next time we touch it).
+- **New tests** — `tests/test_validate_jobs.py` adds 3 cases:
+  - `boards.eu.greenhouse.io/<slug>/jobs/<id>` → `("greenhouse", slug)`
+  - `job-boards.eu.greenhouse.io/<slug>/jobs/<id>` → `("greenhouse", slug)`
+  - Custom domains with `?gh_jid=<id>` (Nebius, Make) → returns None (these fall through to name-index lookup, which works correctly post-v3.0.6 since the index is now Notion-sourced)
+
+### What's still NOT covered
+
+- **Custom-domain Greenhouse-backed listings** (Nebius `careers.nebius.com`, Make `make.com/en/careers-detail`) where the URL has `?gh_jid=<id>` but no slug-revealing path. URL dispatch returns None; name-index fallback is the only recovery. This works post-v3.0.6 because the index is the right one. But: if a user removes the favorite mid-cycle, the listing becomes uncertain again. Acceptable cost for the simpler regex.
+- **Lever fetcher** still not implemented in `fetch-and-diff.py` — `validate-favorites.py` can detect lever, fetch can't. Lever-tagged favorites silently produce zero jobs. Documentation gap; track for a future patch.
+- **`gh_jid` regex extraction** as a fallback signal — could detect Greenhouse-backing for any custom domain by sniffing the query param, then use favorite's slug for the API call. Not in v3.0.6 — adds complexity for marginal coverage gain over the index-source fix.
+
+### Versions
+
+- Plugin: 3.0.5 → 3.0.6
+- Tests: 164 → 167 (+3 EU subdomain + custom-domain coverage)
+
+---
+
 ## [3.0.5] — 2026-05-03
 
 ### Token tracking per run (cost observability)

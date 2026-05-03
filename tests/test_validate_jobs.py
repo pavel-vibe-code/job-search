@@ -43,6 +43,27 @@ class AtsFromUrlTests(unittest.TestCase):
             ("greenhouse", "togetherai"),
         )
 
+    def test_greenhouse_eu_subdomain_classic(self):
+        # Greenhouse EU data residency — boards.eu.greenhouse.io
+        self.assertEqual(
+            self.mod.ats_from_url("https://boards.eu.greenhouse.io/parloa/jobs/4799672101"),
+            ("greenhouse", "parloa"),
+        )
+
+    def test_greenhouse_eu_subdomain_new(self):
+        # Greenhouse EU data residency — job-boards.eu.greenhouse.io (the form Parloa/JetBrains use)
+        self.assertEqual(
+            self.mod.ats_from_url("https://job-boards.eu.greenhouse.io/jetbrains/jobs/4708584101"),
+            ("greenhouse", "jetbrains"),
+        )
+
+    def test_greenhouse_custom_domain_with_gh_jid_returns_none(self):
+        # Custom domains with gh_jid query param (Nebius, Make) — URL pattern doesn't reveal the slug,
+        # so URL dispatch returns None. These fall through to name-index lookup, which now uses the
+        # hydrated favorites file (post-v3.0.6 orchestrator wiring).
+        self.assertIsNone(self.mod.ats_from_url("https://careers.nebius.com/?gh_jid=4809236101"))
+        self.assertIsNone(self.mod.ats_from_url("https://www.make.com/en/careers-detail?gh_jid=6657197003"))
+
     def test_lever(self):
         # Lever is recognized as an ATS but not currently supported by the validator;
         # returns (lever, slug) so downstream code can dispatch or mark unsupported.
