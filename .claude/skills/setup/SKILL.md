@@ -122,6 +122,29 @@ NOT:
 
 If anything is ambiguous, re-ask one targeted clarifying question rather than guessing.
 
+**Q3.5 — Hard exclusions for remote roles:** "Are there countries or regions you'd reject even for remote roles? I.e. if a job is 'Remote — US only' or 'Remote — Brazil', do you want it dropped before scoring, or is geography irrelevant for remote?
+
+(Examples:
+  'EU only — drop anything country-locked outside EU',
+  'no, anywhere remote is fine for me',
+  'reject US, Brazil, India, anything Asia-Pacific',
+  'open to anywhere except UK and Ireland')"
+
+This is the *symmetric* question to Q3. Q3 captured what the user is eligible for (positive list); Q3.5 captures what they actively reject (negative list). Both are needed because they answer different questions: "where can I work?" vs. "where will I never work?"
+
+Parse Q3.5 into a **typed `hard_exclusions` rule** the runtime applies deterministically before scoring (introduced v2.5.0 schema):
+
+| User intent | Rule emitted |
+|---|---|
+| "EU only, drop everything else" | `{"type": "remote_country_lock", "eligible_remote_regions": ["EU"]}` |
+| "no, geography irrelevant for remote" | (no `remote_country_lock` rule) |
+| "reject US, India, APAC" | `{"type": "remote_country_lock", "reject_remote_in": ["United States", "India", "Asia-Pacific"]}` |
+| "open to anywhere except UK and Ireland" | `{"type": "remote_country_lock", "reject_remote_in": ["United Kingdom", "Ireland"]}` |
+
+Hold this rule in memory; it gets written into `profile.hard_exclusions.rules` in Step 6.
+
+**Critical:** without this question, free-text Q3 like "EU only" gets translated only into a positive `eligible_regions` list — non-EU remote slips through silently. Q3.5 forces the symmetric capture.
+
 **Q4:** "What types of roles are you targeting? Describe them in plain language — I'll structure them into search keywords.
 
 (Examples: 'VP or Director level Customer Success or Support', 'Head of AI or AI Operations', 'Founding PM at early-stage AI companies')
@@ -601,6 +624,16 @@ Build `profile.json` from all collected answers:
     "Must not be entry-level or junior roles"
   ],
 
+  "hard_exclusions": {
+    "schema_version": 1,
+    "rules": [
+      {"type": "language_required", "user_languages": [{Q6}], "reject_if_other_required": true},
+      {if Q3.5 captured a remote_country_lock rule: emit it here verbatim},
+      {if eligible_regions is narrow (e.g. just ["EU"]): also emit "country_lock" rule with reject_outside set to those regions},
+      {any title-pattern exclusions the wizard derived from Step 4b moves: e.g. {"type": "title_pattern", "reject_if_contains": ["Marketing", "Sales"], "unless_also_contains": []}}
+    ]
+  },
+
   "ats_platforms": {
     "ashby":      "https://jobs.ashbyhq.com/{company}",
     "greenhouse": "https://boards.greenhouse.io/{company}",
@@ -660,7 +693,7 @@ printf '{"setup_completed":"%s","method":"guided","deployment_mode":"%s","auth_m
 
 ---
 
-## Step 7 — Favorites (optional)
+## Step 7 — Favorites (optional, with careers-URL capture)
 
 Print:
 
@@ -670,16 +703,72 @@ Print:
 Optional: any specific companies to track beyond the AI 50 list?
 (e.g. your target employer, a competitor, a company in your niche)
 
-Type company names separated by commas, or press Enter to skip.
+For each company, paste the URL of their careers page if you have it
+handy — that lets me detect their ATS deterministically (much faster
+than guessing). If you don't have URLs, I'll detect the ATS by probing
+common platforms.
+
+Format examples:
+  Together AI, https://job-boards.greenhouse.io/togetherai
+  Cohere, https://jobs.lever.co/cohere
+  Anthropic                                    ← name only is fine too
+
+One company per line. Press Enter on a blank line to finish, or just
+press Enter now to skip.
 ```
 
-If they provide companies: for each one, run the ATS detection flow from validate-favorites — fetch the careers page, detect platform, build a favorite-company object.
+For each entry:
+1. **If careers_url provided:** parse it against known ATS host patterns (introduced v2.5.0):
+   - `(?:jobs|job-boards)\.ashbyhq\.com/<slug>` → `ats: ashby, slug: <slug>`
+   - `(?:boards|job-boards)\.greenhouse\.io/<slug>` → `ats: greenhouse, slug: <slug>`
+   - `jobs\.lever\.co/<slug>` → `ats: lever, slug: <slug>`
+   - `www\.comeet\.com/jobs/<slug>` → `ats: comeet, slug: <slug>`
+   
+   Store the resolved entry as `{name, ats, slug, careers_url, source: "user_added"}`. URL is preserved even if ats was derived deterministically — it's forward-compatible: if a future version adds Workable/Personio support, the URL is already there to re-parse.
+2. **If careers_url not provided:** fall back to ATS auto-detection (the legacy `validate-favorites.py` slug-variant probing). Store as `{name, ats, slug, source: "user_added"}` with no careers_url field.
+3. **If careers_url provided but URL doesn't match any supported ATS:** store with `ats: "skip"` plus the careers_url. The fetcher will skip but the URL is preserved for future extensibility.
 
 **Local mode:** write the resulting array to `./config/favorites.json` (replacing samples).
 
 **Cloud mode:** use `notion-update-page` (replace_content) to set the body of the AI 50 Favorites page to a single ```json code block containing the array. Leave `config/favorites.json` as the shipped template.
 
 If they skip: in local mode leave the sample favorites.json in place; in cloud mode write `[]` to the AI 50 Favorites page.
+
+---
+
+## Step 7.5 — Confirm typed exclusion rules (sanity check)
+
+Before declaring setup complete, show the user the typed `hard_exclusions` rules generated from Q3.5 + Q6 + any wizard-derived exclusions. This is the catch-it-now moment if the wizard mistranslated free-text intent.
+
+Print (substituting actual values from the in-memory profile):
+
+```
+━━━ Hard exclusions ━━━
+The following filters will be applied BEFORE scoring on every run.
+Anything matching these gets dropped, never scored.
+
+  1. Language: jobs requiring fluency in a language other than {Q6}
+     will be excluded.
+  
+  {if remote_country_lock rule with eligible_remote_regions:}
+  2. Remote location: only remote roles eligible to {eligible_remote_regions}
+     will pass. "Remote — US only", "Remote — Brazil" etc. will be
+     dropped.
+  
+  {if remote_country_lock rule with reject_remote_in:}
+  2. Remote location: roles locked to {reject_remote_in} will be
+     dropped (even if title fits and seniority matches).
+
+  {if title_pattern rule:}
+  3. Title patterns: roles whose title primarily indicates
+     {reject_if_contains} will be dropped.
+
+Are these correct? (yes / let me adjust)
+```
+
+If user says "let me adjust" — re-ask Q3.5 (or the relevant question) and regenerate the rules. If "yes" — proceed to Step 8.
+
+This is the lightweight version of post-wizard validation. The fuller version (showing 5 sample listings and asking which the user would include/exclude) ships with the recalibrate-scoring skill in v2.5.2.
 
 ---
 

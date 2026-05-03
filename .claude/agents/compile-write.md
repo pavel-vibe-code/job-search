@@ -128,7 +128,8 @@ Read the profile JSON for:
 - `scoring.criteria` — required, dict of weighted criteria
 - `scoring.bonuses` — optional, dict of bonus criteria (lift score but don't define it)
 - `scoring.minimum_score`, `scoring.hot_score_threshold`, `scoring.max_score`
-- `exclusion_rules` — array of hard filters; jobs matching ANY are dropped before scoring
+- `hard_exclusions` (v2.5.0+) — typed rules object; jobs matching ANY are dropped before scoring. See Step 2 for the schema.
+- `exclusion_rules` (legacy, still honored) — array of free-text rules; jobs matching ANY are dropped before scoring
 - `candidate.spoken_languages` — array; any job requiring a language not in this list is excluded
 - `candidate` and `context` for general scoring evidence
 
@@ -141,13 +142,49 @@ Read the connectors JSON only for:
 
 ## Step 2 — Apply hard exclusions FIRST
 
-Before scoring anything, walk every candidate through `profile.json[exclusion_rules]` and `candidate.spoken_languages`. Drop the candidate (don't score, don't write) if ANY rule matches. Track drop reasons for the run summary.
+Before scoring anything, walk every candidate through:
+1. **Typed `hard_exclusions.rules`** (v2.5.0+ schema, preferred when present)
+2. **Legacy `exclusion_rules`** (free-text, fallback for pre-v2.5 profiles)
+3. **`candidate.spoken_languages`** (always honored)
 
-Common hard exclusions (specifics depend on user's profile):
+Drop the candidate (don't score, don't write) if ANY rule matches. Track drop reasons for the run summary, naming the matched rule for diagnostics.
+
+### Typed `hard_exclusions` rule types (v2.5.0+)
+
+```json
+{
+  "schema_version": 1,
+  "rules": [
+    {"type": "country_lock",        "reject_outside": ["EU", "Czech Republic"]},
+    {"type": "language_required",   "user_languages": ["English"], "reject_if_other_required": true},
+    {"type": "title_pattern",       "reject_if_contains": ["Marketing", "Sales"], "unless_also_contains": []},
+    {"type": "seniority_floor",     "minimum_level": "senior_ic"},
+    {"type": "remote_country_lock", "eligible_remote_regions": ["EU"]}
+  ]
+}
+```
+
+Apply each rule type by its semantics:
+
+| Rule type | Drops candidate when |
+|---|---|
+| `country_lock` | Listing's location is NOT in `reject_outside` set (i.e. eligible regions are positively listed) |
+| `language_required` | Listing requires fluency in a language not in `user_languages` AND `reject_if_other_required: true` |
+| `title_pattern` | Listing title contains ANY of `reject_if_contains` AND does NOT contain any of `unless_also_contains` |
+| `seniority_floor` | Listing seniority is below `minimum_level` (e.g. junior/entry-level when floor is senior) |
+| `remote_country_lock` | Listing is "Remote — \<country>" where \<country> is NOT in `eligible_remote_regions` (or IS in `reject_remote_in` if that variant of the rule is used) |
+
+If `hard_exclusions.rules` is missing, empty, or has `schema_version` not equal to 1, fall back to legacy `exclusion_rules` interpretation (Step 2 legacy path below).
+
+### Legacy `exclusion_rules` (free-text)
+
+Common patterns (specifics depend on user's profile):
 - Language: job requires fluency in a language not in `candidate.spoken_languages`
 - Role category: job is a pure Sales / Marketing / Engineering role when user's role_types don't cover those
 - Location: on-site outside the user's eligible cities; remote with country-residency lock to a country not in eligible_regions
 - Custom rules: anything the wizard moved out of scoring during Step 4b (e.g. "company is not AI-native")
+
+When BOTH typed and legacy forms are present, both are honored — typed handles the deterministic patterns, legacy handles whatever didn't fit the typed schema (judgment-call rules).
 
 ## Step 3 — Score the survivors
 

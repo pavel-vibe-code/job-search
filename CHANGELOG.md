@@ -4,6 +4,42 @@ All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Chang
 
 ---
 
+## [2.5.1] — 2026-05-03
+
+### Wizard generates typed `hard_exclusions` rules
+
+The setup wizard now captures the **symmetric exclusion** that v2.4.x missed: in addition to asking where the user IS eligible (Q1-Q3), it now explicitly asks where the user actively REJECTS, even for remote roles. This was the wizard-translation bug that produced the v2.4.0 first-run problem of US/India/Japan-remote roles ending up in the hot list because `excluded_countries` was empty.
+
+- **New** — Q3.5 in `.claude/skills/setup/SKILL.md` § Step 2: *"Are there countries or regions you'd reject even for remote roles?"* Free-text answer maps to typed `remote_country_lock` rule (with either `eligible_remote_regions` or `reject_remote_in` form).
+- **New** — Step 6 generates `hard_exclusions` block in `profile.json` alongside legacy fields. Includes `language_required`, `country_lock`, `remote_country_lock`, `title_pattern` rules as derived from wizard answers.
+- **New** — Step 7.5 sanity-check prompt: shows the user the typed exclusion rules in plain English BEFORE writing the sentinel. Catches mistranslations at capture time. *"Are these correct? (yes / let me adjust)"* — full-validation-with-sample-listings comes in v2.5.2's recalibrate-scoring skill.
+
+### Compile-write agent honors typed exclusions
+
+`.claude/agents/compile-write.md` § Step 2 rewritten to interpret typed `hard_exclusions.rules` with semantics per rule type. Falls back to legacy free-text `exclusion_rules` when typed block is absent/empty. Both forms can coexist: typed handles deterministic patterns, free-text handles judgment-call rules.
+
+Each of the 5 rule types has explicit drop semantics documented in the agent prompt — no LLM guesswork on what `country_lock` vs `remote_country_lock` mean.
+
+### Favorites collected with `careers_url`
+
+Step 7 of the wizard now invites users to paste careers-page URLs alongside company names. URL parses to `(ats, slug)` deterministically using the v2.5.0 patterns; bypasses ATS auto-detection entirely. URL is preserved in the favorites entry even when ATS is derived deterministically — forward-compatible for future ATS support additions.
+
+```
+Format examples:
+  Together AI, https://job-boards.greenhouse.io/togetherai
+  Cohere, https://jobs.lever.co/cohere
+  Anthropic                                    ← name only is fine too
+```
+
+If user provides URL but it doesn't match a known ATS (e.g. workable.com), entry is stored with `ats: "skip"` plus the URL — fetcher skips today, but URL is there to re-parse when support is added.
+
+### Versions
+
+- Plugin: 2.5.0 → 2.5.1
+- Tests: 164 (no test changes — wizard + agent prompts are markdown-only changes)
+
+---
+
 ## [2.5.0] — 2026-05-03
 
 ### Validator URL-dispatch (fixes name-based "uncertain" misclassifications)
