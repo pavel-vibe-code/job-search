@@ -120,13 +120,38 @@ Read `./config/connectors.json` only for:
 
 ## Step 2 — Filter hot jobs
 
-From the list of jobs passed by the orchestrator (new jobs written this run), keep only those where `fit_score >= hot_score_threshold`.
+**Hot definition depends on profile shape:**
+
+- **v3 path (profile has `cv_json`):** Hot = entries with `Match: "High"`. No threshold tuning. Order by `confidence` (high → first).
+- **Legacy path (no `cv_json`):** Hot = entries where `fit_score >= hot_score_threshold`.
 
 If zero jobs are hot, still create the digest — just note "No hot matches this run" in the document. Do not skip creating the document.
 
 ## Step 3 — Format the digest
 
-Build the hot list content in this format:
+**v3 path digest format:**
+
+```
+🔥 Hot Jobs — {today's date}
+Run: AI 50 + Favorites | {N} companies checked | {N} new jobs added | {N} High-bucket matches
+
+---
+
+[High · confidence: {high|medium|low}] {Company} — {Job Title}
+📍 {Location}
+{Reasoning — 1-3 sentences from LLM rationale}
+Key factors:
+  • match: ...
+  • match: ...
+  • concern: ... (only if non-empty)
+🔗 Apply: {URL}
+
+---
+
+[High · ...] ...
+```
+
+**Legacy path digest format:**
 
 ```
 🔥 Hot Jobs — {today's date}

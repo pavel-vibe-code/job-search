@@ -4,6 +4,76 @@ All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Chang
 
 ---
 
+## [3.0.0-rc1] — 2026-05-03
+
+### Hybrid LLM-judged categorical scoring (architectural shift)
+
+The structured numeric rubric (`scoring.criteria` × weights → 0-N score) is replaced — for profiles that opt in via CV upload — with **categorical LLM judgment** (`High` / `Mid` / `Low` buckets) against a CV-grounded free-text profile. Hard exclusions still filter aggressively first (using v2.5's typed `hard_exclusions` schema); LLM judgment runs on survivors.
+
+**Why this matters:**
+
+- Numeric scores hide imprecision (no real difference between 6 and 7) and drift across runs
+- Title-keyword role_types miss nuance — a "Senior Applied AI Engineer" matched user's `ai-fde` keywords but is wrong-fit because it's pure-eng-IC, not customer-facing FDE (real bug surfaced by v2.4 first run)
+- Wizard's translation of free-text intent into structured rules is lossy — even after v2.5.1's improvements, edge cases slip through
+- LLM judgment with explicit `match:` / `concern:` / `gap:` factors makes the bucket assignment **inspectable** — user reads key_factors in tracker and immediately sees why something landed where it did
+
+### Backward compatibility
+
+**Profiles without `cv_json` continue using the legacy structured rubric path** (§7.1–§7.4 in ARCHITECTURE.md). Compile-write picks the path based on profile shape — no breaking change for existing v2.x profiles. To migrate, re-run `set up the plugin`, opt in to CV upload at Step 3.5, and the new path activates.
+
+### Profile schema additions
+
+- `cv_json` — top-level structured CV (extracted from PDF upload during Step 3.5). See ARCHITECTURE.md §7.5 for full schema. Includes `experience` (work history with achievements + technologies), `skills` (categorized), `career_signals` (seniority, years, geographic_base), and `extracted_keywords` (~30 phrases used both for Pass 3 LLM grounding and as future-Pass-1 keyword-density signal).
+- `scoring.instructions` — optional free-text hint to the LLM scorer. e.g. *"be strict on AI-native vs AI-bolted-on"*. Replaces the structured `criteria` + `bonuses` blocks for v3 profiles.
+- `context` (existing field) is the narrative source — wants/avoids/aspirations from wizard Q7. Read by v3 LLM scoring as candidate intent.
+
+### Tracker DB schema additions
+
+- **`Match`** (select: `High` / `Mid` / `Low`) — LLM verdict. Replaces numeric `Score` for v3 entries (legacy entries keep `Score`, set `Match` to null).
+- **`Reasoning`** (rich text) — LLM rationale, 1-3 sentences explaining the bucket assignment.
+- **`Key Factors`** (rich text) — bulleted `match:` / `concern:` / `gap:` lines comparing profile attrs to JD requirements.
+- `Score` retained for legacy backward compat.
+
+`Match Quality` (user feedback, same High/Mid/Low vocabulary) and `Feedback Comment` columns ship in v3.0.0 alongside the feedback-recycle skill.
+
+### Setup wizard CV upload step
+
+New Step 3.5 in `.claude/skills/setup/SKILL.md`:
+- Asks user to paste path to CV or LinkedIn 'Save to PDF' export (or skip for legacy path)
+- Reads PDF via Claude Code's native PDF reading
+- One-shot LLM extraction call converts to canonical JSON schema (preserves achievement metrics, generates ~30 extracted_keywords)
+- Shows extracted JSON to user for review/correction before saving
+- If CV captured: Step 4 (scoring rubric) skips criteria/weights elicitation, asks only for optional `scoring.instructions` hint
+
+### Compile-write rewrite
+
+- Step 3 picks the scoring path based on `profile.cv_json` presence
+- Step 3.v3: builds LLM scoring prompt (profile narrative + cv_json + scoring.instructions + few-shot examples + listing), calls Claude with prompt-caching enabled for the constant profile section, parses `{verdict, rationale, key_factors, confidence}`
+- Step 3.legacy: unchanged (structured rubric scoring)
+- Step 4: write rules updated for both paths — v3 sets Match/Reasoning/Key Factors/Score=null, legacy sets Score and leaves new columns null
+
+### Notify-hot redefined
+
+- v3 path: Hot = `Match: "High"` entries, ordered by `confidence` (high → first). Renders Reasoning + Key Factors bullets.
+- Legacy path: unchanged (score ≥ hot_score_threshold).
+
+### Ships in v3.0-rc1
+
+This is a release candidate. The full v3.0.0 release will include:
+- Notion-feedback learning loop (`feedback-recycle` skill)
+- `Match Quality` + `Feedback Comment` tracker columns
+- Auto-recycling of user-labeled disagreements into profile anti-patterns + few-shot examples store
+
+Migrating to v3 is opt-in via CV upload during setup. Test the v3 path in a clean Notion workspace before swapping your production profile.
+
+### Versions
+
+- Plugin: 2.5.2 → 3.0.0-rc1
+- Tests: 164 (no test changes — schema + agent prompt changes are markdown/JSON only; LLM-scoring path can't be unit-tested locally without API calls)
+- Skills: run-job-search, setup, validate-favorites, recalibrate-scoring (all updated for v3 path or carry through unchanged)
+
+---
+
 ## [2.5.2] — 2026-05-03
 
 ### Uncertain-job tracker handling (fixes silent state-poisoning)

@@ -196,6 +196,74 @@ When BOTH typed and legacy forms are present, both are honored — typed handles
 
 ## Step 3 — Score the survivors
 
+**Pick the scoring path** based on profile shape:
+
+| Profile has | Use |
+|---|---|
+| `cv_json` field | **v3 path (Step 3.v3 below)** — LLM-judged categorical scoring, High/Mid/Low buckets |
+| No `cv_json` (legacy) | **Legacy path (Step 3.legacy below)** — structured rubric, numeric score |
+
+### Step 3.v3 — LLM-judged categorical scoring (when `cv_json` present)
+
+For each survivor, build a single LLM scoring prompt and parse the response. The prompt structure:
+
+```
+You are scoring a job listing against a candidate's profile and CV.
+
+Profile narrative (intent — what the user wants/avoids):
+{profile.context}
+
+CV — structured (substance):
+{profile.cv_json}
+
+Scoring instructions (optional hints):
+{profile.scoring.instructions or "(none)"}
+
+Few-shot examples from this user's prior labels (when available; ship empty in v3.0-rc1):
+{few_shot_examples or "(none yet)"}
+
+This listing:
+  Title:    {candidate.title}
+  Company:  {candidate.company}
+  Location: {candidate.location}
+  URL:      {candidate.url}
+  Description:
+  {candidate.description}
+
+Task — produce a structured comparison:
+  1. List `match:` factors — profile attributes the JD specifically calls for or values.
+  2. List `concern:` factors — profile attributes that conflict with JD requirements.
+  3. List `gap:` factors — JD requirements that the profile doesn't cover.
+  4. Cite specific profile fields where possible (e.g.
+     "match: cv_json.experience[0].achievements 'AI deflection 50% YoY'
+      directly addresses JD's 'experience with AI-driven cost reduction'").
+  5. Weigh: match density relative to severity of concerns/gaps.
+  6. Assign verdict:
+     - High: matches dominate AND no critical concerns
+     - Mid:  matches and concerns are mixed OR JD is too sparse to confidently assess
+     - Low:  few matches OR major requirements unmet
+  7. Estimate confidence (high / medium / low).
+
+Output JSON only:
+{
+  "verdict":     "High" | "Mid" | "Low",
+  "rationale":   "1-3 sentences explaining the bucket assignment",
+  "key_factors": ["match: ...", "match: ...", "concern: ...", "gap: ..."],
+  "confidence":  "high" | "medium" | "low"
+}
+```
+
+**Implementation guidance:**
+
+- Use Claude Sonnet 4.6 (default) or Haiku 4.5 (cost-optimized) — set per `profile.scoring.instructions` if user specified, else default.
+- Use Anthropic prompt caching for the constant profile section: caching the (narrative + cv_json + scoring.instructions + few_shot_examples) block dramatically reduces cost across N candidates in one run. Cache control: `{"type": "ephemeral"}` on the profile content block.
+- Use `temperature=0` for stability across runs.
+- Parse the response as JSON. If parsing fails, log the raw response and assign `Mid` with a confidence=`low` and rationale noting the parse failure — never fail the run on a single LLM hiccup.
+
+**Bucket assignment is match-density-driven, not holistic-vibe.** The LLM enumerates factors first, then weighs. Sparse JDs default to Mid. Critical concerns (e.g. seniority mismatch) downgrade from pure match counting.
+
+### Step 3.legacy — Structured rubric (when no `cv_json`)
+
 For each surviving candidate, score using the **rubric in `profile.json[scoring]` — no inline defaults**. The user's profile is the source of truth; this prompt MUST NOT inject a default rubric.
 
 The candidate's `description` field is the truncated job description (default cap 600 chars, set by `fetch-and-diff.py --description-limit`). Use it as primary scoring evidence — do not re-fetch the URL.
@@ -211,24 +279,29 @@ Write a 2–3 sentence **"Why Fits"** for each qualifying job that names which c
 
 ## Step 4 — Write new qualifying jobs to tracker
 
-For jobs scoring ≥ `profile.json[scoring.minimum_score]`:
+**Eligibility for write:**
+- v3 path: write candidates with `verdict in ("High", "Mid")` — Low entries are dropped (don't bloat tracker with rejections; they're documented in run summary count). User can disagree by labeling Low entries — see v3.0.0 feedback-recycle.
+- Legacy path: write jobs scoring ≥ `profile.json[scoring.minimum_score]`.
 
 Query existing rows in the **tracker DB ID passed inline by the orchestrator** (NOT from connectors.json — that field doesn't exist in v2.3+; see Step 1) to collect known URLs. Skip any candidate whose URL is already present. Use `query-database` (api_token mode) or `notion-search` against the data source (mcp mode).
 
 Create a new page per qualifying job. **Schema must match what the wizard creates** (any drift here = silent property-not-found errors that look like the writes succeeded but no values landed):
 
-| Wizard column | Type            | Value                                        |
-|---------------|-----------------|----------------------------------------------|
-| `Title`       | title           | Exact job title                              |
-| `Company`     | rich_text       | Company name (NOT a select)                  |
-| `Score`       | number          | Final fit score                              |
-| `Location`    | rich_text       | Location string                              |
-| `Status`      | select          | "New" for live qualifying jobs; "Uncertain" for Pass-2-uncertain entries (see Step 4b) |
-| `URL`         | url             | Direct ATS URL                               |
-| `Department`  | rich_text       | Department string from ATS (or empty)        |
-| `Source`      | rich_text       | "ai50" or "favorites"                        |
-| `Date Added`  | date            | Today, ISO 8601                              |
-| `Why Fits`    | rich_text       | 2-3 sentence rationale naming criteria + weights |
+| Wizard column | Type      | v3 path value                                       | Legacy path value                                |
+|---------------|-----------|-----------------------------------------------------|--------------------------------------------------|
+| `Title`       | title     | Exact job title                                     | Exact job title                                  |
+| `Company`     | rich_text | Company name (NOT a select)                         | Company name                                     |
+| `Score`       | number    | `null` (categorical takes its place)                | Final fit score                                  |
+| `Match`       | select    | `"High"` / `"Mid"` (Low entries aren't written)     | (omit — null in legacy path)                     |
+| `Location`    | rich_text | Location string                                     | Location string                                  |
+| `Status`      | select    | `"New"` for live; `"Uncertain"` for Pass-2-uncertain | `"New"` for live; `"Uncertain"` for Pass-2-uncertain |
+| `URL`         | url       | Direct ATS URL                                      | Direct ATS URL                                   |
+| `Department`  | rich_text | Department string                                   | Department string                                |
+| `Source`      | rich_text | `"ai50"` / `"favorites"`                            | `"ai50"` / `"favorites"`                         |
+| `Date Added`  | date      | Today, ISO 8601                                     | Today, ISO 8601                                  |
+| `Why Fits`    | rich_text | LLM rationale (back-compat — same content as Reasoning) | 2-3 sentence rubric rationale                |
+| `Reasoning`   | rich_text | LLM rationale (1-3 sentences, why this verdict)     | (omit — null in legacy path)                     |
+| `Key Factors` | rich_text | Bulleted match: / concern: / gap: lines (one per line) | (omit — null in legacy path)                  |
 
 When using `notion-api.py create-pages`, the helper's `pack_properties` heuristic accepts a flat `{name: value}` shape; pre-built nested objects (like `{"Status": {"select": {"name": "New"}}}`) pass through unchanged.
 

@@ -1,11 +1,17 @@
 {
-  "_comment": "Notion property schema for the Job Tracker database. Used by setup wizard (Step 5b.1) to create the DB; ALSO used by run-job-search Step P-3 to recreate the DB if it goes missing. Keep this single source of truth — do NOT inline the schema as DDL pseudocode anywhere else (the previous version's wizard had it inline, which led to drift between setup and recreate paths).",
+  "_comment": "Notion property schema for the Job Tracker database. Used by setup wizard to create the DB; ALSO used by run-job-search Step P-3 to recreate the DB if it goes missing. Keep this single source of truth — do NOT inline the schema as DDL pseudocode anywhere else.",
+  "_v3_note": "v3.0 introduces Match (categorical), Reasoning, Key Factors columns alongside legacy Score. Both forms coexist for backward compat: profiles without cv_json use legacy structured-rubric scoring (writes Score); v3 profiles use LLM-judged categorical (writes Match + Reasoning + Key Factors, sets Score=null). Match Quality + Feedback Comment columns ship in v3.0.0 for the learning loop.",
 
-  "Title":      {"title": {}},
-  "Company":    {"rich_text": {}},
-  "Score":      {"number": {}},
-  "Location":   {"rich_text": {}},
-  "Status":     {"select": {"options": [
+  "Title":            {"title": {}},
+  "Company":          {"rich_text": {}},
+  "Score":            {"number": {}},
+  "Match":            {"select": {"options": [
+    {"name": "High",  "color": "green"},
+    {"name": "Mid",   "color": "yellow"},
+    {"name": "Low",   "color": "gray"}
+  ]}},
+  "Location":         {"rich_text": {}},
+  "Status":           {"select": {"options": [
     {"name": "New",            "color": "blue"},
     {"name": "Uncertain",      "color": "purple"},
     {"name": "Reviewed",       "color": "yellow"},
@@ -13,9 +19,11 @@
     {"name": "Closed",         "color": "gray"},
     {"name": "Not interested", "color": "red"}
   ]}},
-  "URL":        {"url": {}},
-  "Department": {"rich_text": {}},
-  "Source":     {"rich_text": {}},
-  "Date Added": {"date": {}},
-  "Why Fits":   {"rich_text": {}}
+  "URL":              {"url": {}},
+  "Department":       {"rich_text": {}},
+  "Source":           {"rich_text": {}},
+  "Date Added":       {"date": {}},
+  "Why Fits":         {"rich_text": {}},
+  "Reasoning":        {"rich_text": {}},
+  "Key Factors":      {"rich_text": {}}
 }

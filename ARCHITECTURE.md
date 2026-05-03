@@ -300,6 +300,8 @@ script: new_jobs (raw diff) ──► agent applies filters ──► candidates
 
 ## 7. Scoring rubric (Pass 3 details)
 
+> **v3.0 architectural shift.** The structured numeric rubric documented in §7.1–§7.4 below is the **legacy path**, still honored for profiles created by pre-v3 wizards. v3.0 introduces an alternative: hard exclusions filter aggressively (deterministic, free), then surviving candidates get LLM-judged categorical scoring (`High` / `Mid` / `Low`) against a CV-grounded free-text profile. See §7.5 below for the v3 path. The compile-write agent picks the path based on whether `profile.cv_json` is present.
+
 The setup wizard collects criteria + priorities (high/medium/low) in plain English; the wizard's agent reflects on the input and proposes weights + thresholds. The user approves / adjusts / re-thinks.
 
 ### 7.1 Schema in profile.json
@@ -378,6 +380,61 @@ Where `partial(c, job)` returns 0 (no match), 0.5 (partial), or 1 (full match).
 ### 7.4 "Why Fits" rationale
 
 Each written row gets a 2-3 sentence explanation naming the criteria it scored on, with weights. The user reads this in the tracker to understand *why* each role surfaced — invaluable for tuning the rubric over time.
+
+### 7.5 v3.0 hybrid scoring path (CV-grounded LLM judgment)
+
+When `profile.cv_json` is present, compile-write switches to the v3 path. Numeric Score becomes irrelevant; categorical Match takes its place.
+
+**v3 profile schema additions:**
+
+The wizard's Q7 free-text answer (already stored as `profile.context`) serves as the narrative — wants/avoids/aspirations/target patterns. v3 reads `profile.context` as the narrative; no new `narrative` field needed.
+
+```json
+{
+  "context": "Wizard's Q7 — free-text background, goals, preferences. Read by v3 LLM scoring as the candidate intent.",
+
+  "cv_json": {
+    "extracted_at": "2026-05-03",
+    "source_format": "linkedin_pdf",
+    "summary": "2-sentence headline",
+    "experience": [
+      { "role": "...", "company": "...", "from": "...", "to": "...",
+        "scope": "...", "key_achievements": ["..."], "technologies_tools": ["..."] }
+    ],
+    "skills": { "leadership": [...], "technical": [...], "domain": [...], "languages_spoken": [...] },
+    "education": [{"degree": "...", "institution": "...", "year": ...}],
+    "career_signals": {
+      "seniority_level": "...", "years_experience_total": N,
+      "industry_focus": [...], "function_focus": [...], "geographic_base": "..."
+    },
+    "extracted_keywords": [/* ~30 phrases — technical + functional + domain */]
+  },
+
+  "hard_exclusions": { /* typed schema from v2.5.0 */ },
+
+  "scoring": {
+    "instructions": "Optional free-text LLM scoring hint, e.g. 'be strict on AI-native vs AI-bolt-on; reward customer-facing leadership over IC roles'."
+  }
+}
+```
+
+**v3 Pass 3 flow:**
+
+1. **Hard exclusions** (typed `hard_exclusions.rules` from v2.5.0): drop candidate before any LLM call.
+2. **Build LLM scoring prompt** for each survivor:
+   - Profile (cv_json + narrative + hard_exclusions for context)
+   - Few-shot examples from v3.0.0 feedback-recycle (when available — empty in v3.0-rc1)
+   - Listing (title, company, location, full JD)
+   - Task: list `match:` / `concern:` / `gap:` factors comparing profile attrs to JD requirements; assign `High` / `Mid` / `Low`.
+3. **Single Sonnet/Haiku call per candidate.** Output: `{verdict, rationale, key_factors, confidence}`.
+4. **Write to tracker** with new columns: `Match` (verdict), `Reasoning` (rationale), `Key Factors` (bulleted match/concern/gap), `Score: null` (legacy column unused in v3 path), `Why Fits` populated with rationale (back-compat for users who filter by it).
+5. **Hot list = High bucket.** `notify-hot` digest renders High entries ordered by `confidence` (high → first).
+
+**Bucket assignment rule:** Match density between profile attributes and JD requirements drives the bucket, with critical-concern weighting. High = matches dominate AND no critical concerns. Mid = mixed or sparse-JD default. Low = few matches or major requirements unmet. The LLM prompt forces explicit factor enumeration (the `key_factors` field) so bucket assignment is inspectable.
+
+**Cost optimization:** Anthropic prompt caching for the constant profile section. ~200 candidates × constant profile = N-1 cache hits per run.
+
+**Backward compat:** profiles without `cv_json` continue using the legacy structured-rubric path documented in §7.1–§7.4.
 
 ---
 

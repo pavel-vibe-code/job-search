@@ -187,7 +187,89 @@ Store the full answer verbatim as `"context"` in profile.json. This field has no
 
 ---
 
+## Step 3.5 — CV / LinkedIn upload (v3.0+, optional)
+
+Print:
+
+```
+Optional but strongly recommended: upload your CV or LinkedIn profile
+('Save to PDF' export) so the scoring system has substance to match against.
+
+How this changes the scoring:
+  • WITH CV  → LLM-judged categorical (High / Mid / Low) match against your
+               actual experience. Each tracker entry shows exactly which
+               profile attributes the JD addresses (and which are gaps).
+  • WITHOUT  → Structured rubric scoring (criteria × weights). Numeric
+               score 0-N. Rubric must be tuned manually — less nuanced.
+
+Paste a path to your PDF, or press Enter to skip.
+(Examples:
+  /Users/me/Documents/cv-2026.pdf
+  ~/Downloads/Linkedin-Profile.pdf)
+```
+
+If user skips: continue to Step 4 with no `cv_json` in profile (legacy structured-rubric path will be used).
+
+If user provides a path:
+
+1. **Read the PDF** using Claude Code's native PDF reading capability. The Read tool accepts `.pdf` paths and returns extracted text + structure.
+
+2. **Extract structured JSON** by invoking your own LLM judgment on the extracted text. Build a single one-shot prompt like:
+
+   ```
+   Convert this CV text into the canonical JSON schema below. Be specific in
+   achievements (preserve numbers and metrics). For extracted_keywords, list
+   ~30 phrases — both technical (tools, technologies, methodologies) and
+   functional (role types, industry segments, leadership scope, domain expertise).
+
+   Schema:
+   {
+     "extracted_at": "{today, ISO 8601}",
+     "source_format": "{cv | linkedin_pdf}",
+     "summary": "...",
+     "experience": [...],
+     "skills": {...},
+     "education": [...],
+     "career_signals": {...},
+     "extracted_keywords": [...]
+   }
+
+   CV text:
+   {extracted_text}
+   ```
+
+   See `ARCHITECTURE.md §7.5` for the full canonical schema with field semantics.
+
+3. **Show the extracted JSON to the user** in a readable form (don't dump raw JSON; format the highlights):
+
+   ```
+   ━━━ CV extracted ━━━
+   Summary:    {summary}
+   Experience: {N entries spanning {from} → {to}}
+   Skills:     {leadership, technical, domain counts}
+   Keywords:   {first 10 of extracted_keywords}, +{N} more
+   Career signal: {seniority_level}, {years_experience_total} years,
+                  {function_focus[0]}, based in {geographic_base}
+
+   Anything missing or wrong? (yes / looks good)
+   ```
+
+4. **If user says "yes"** — ask which field they want to fix, take their correction, regenerate that section, show again. Loop until "looks good."
+
+5. **Store as `profile.cv_json`** in memory; written to profile during Step 6.
+
+**If PDF read fails** (corrupt, password-protected, etc.): fall back to skip path. Tell the user *"Couldn't read that PDF. You can try again with a different file or skip — without a CV, the scoring system uses the structured-rubric fallback path."*
+
+**Sets the scoring path for this profile:** if `cv_json` is captured here, Step 4 (scoring rubric) becomes simpler — only collect optional `scoring.instructions` free-text hints; skip the criteria + weights elicitation. If `cv_json` is skipped, Step 4 runs as documented (criteria + bonuses + thresholds).
+
+---
+
 ## Step 4 — Scoring rubric
+
+> **Two paths depending on whether Step 3.5 captured a `cv_json`:**
+>
+> - **v3 path** (cv_json present): skip the criteria/weights collection. Optionally ask: *"Any scoring hints you want to give the LLM? E.g. 'be strict on AI-native vs. AI-bolt-on', 'reward customer-facing leadership over IC roles'. Press Enter to skip — the LLM will infer from your CV + narrative directly."* Store the response (or empty string) as `profile.scoring.instructions`. Skip 4a/4b/4c below.
+> - **Legacy path** (no cv_json): run the full criteria + weights elicitation in 4a/4b/4c below.
 
 Two interactive sub-steps: (a) collect criteria + priorities from the user in plain English, then (b) propose a weighted rubric with thresholds for the user to approve/adjust.
 
@@ -591,30 +673,38 @@ Build `profile.json` from all collected answers:
 
   "role_types": [{array of role type objects from Q4, confirmed by user}],
 
+  {if Step 3.5 captured a cv_json (v3 path), include it as a top-level field:}
+  "cv_json": {Step 3.5 extracted-and-confirmed CV JSON},
+
   "scoring": {
-    "minimum_score": {from Step 4 proposal, approved by user},
-    "hot_score_threshold": {from Step 4 proposal, approved by user},
-    "max_score": {sum of criteria + bonus weights},
-    "criteria": {
-      "{criterion_id}": {
-        "weight": {N},
-        "label": "{human-readable}",
-        "priority": "high|medium|low",
-        "description": "{one sentence}",
-        "rationale": "{user's why, or empty}"
+    {if v3 path: emit ONLY the optional instructions field, omit criteria/bonuses/thresholds:}
+    {"instructions": "{Step 4 v3-path's optional hint, or empty string}"}
+
+    {if legacy path: emit the full structured rubric:}
+    {"minimum_score": {from Step 4 proposal, approved by user},
+     "hot_score_threshold": {from Step 4 proposal, approved by user},
+     "max_score": {sum of criteria + bonus weights},
+     "criteria": {
+        "{criterion_id}": {
+          "weight": {N},
+          "label": "{human-readable}",
+          "priority": "high|medium|low",
+          "description": "{one sentence}",
+          "rationale": "{user's why, or empty}"
+        },
+        ...
       },
-      ...
-    },
-    "bonuses": {
-      "{bonus_id}": {
-        "weight": {N},
-        "label": "{human-readable}",
-        "priority": "{user's priority — typically 'low', but if the wizard's Adjust loop lifted a bonus to medium it stores 'medium' here}",
-        "description": "{one sentence}"
+      "bonuses": {
+        "{bonus_id}": {
+          "weight": {N},
+          "label": "{human-readable}",
+          "priority": "{user's priority — typically 'low', but if the wizard's Adjust loop lifted a bonus to medium it stores 'medium' here}",
+          "description": "{one sentence}"
+        },
+        ...
       },
-      ...
-    },
-    "_proposal_explanation": "{the 2-3 sentence reasoning the agent gave when proposing this rubric}"
+      "_proposal_explanation": "{the 2-3 sentence reasoning the agent gave when proposing this rubric}"
+    }
   },
 
   "exclusion_rules": [
