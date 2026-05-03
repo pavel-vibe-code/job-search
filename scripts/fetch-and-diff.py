@@ -440,6 +440,96 @@ def fetch_homerun(company: dict) -> Tuple[list, Optional[str]]:
         return [], f"parse_error:{e}"
 
 
+# ── Scrape (v3.2.0) — LLM-extracted careers-page fallback ───────────────────
+ANTHROPIC_API_URL    = "https://api.anthropic.com/v1/messages"
+ANTHROPIC_VERSION    = "2023-06-01"
+SCRAPE_MODEL_DEFAULT = "claude-haiku-4-5-20251001"  # cheap; structured extraction doesn't need Opus
+SCRAPE_HTML_LIMIT    = 200_000  # ~50K tokens of input
+SCRAPE_MAX_TOKENS    = 4000
+
+
+def fetch_scrape(company: dict) -> Tuple[list, Optional[str]]:
+    """Fallback fetcher for companies whose ATS isn't in the supported set.
+
+    Per-favorite opt-in: user adds `{name, ats: "scrape", careers_url: "<url>"}`
+    to favorites. fetcher pulls the careers page HTML, calls Claude API with a
+    structured-extraction prompt, returns array of `{id, title, url, location,
+    department}` job dicts.
+
+    Validation: scrape candidates can't be confirmed via API. They land in the
+    tracker as `Status: Uncertain` (per v2.5.2 envelope) for user spot-check.
+
+    Cost: typical careers page is 50-200K chars HTML → 12-50K input tokens.
+    With Haiku ~$0.01-0.04 per page; for 5-10 scrape favorites per fire,
+    ~$0.05-$0.40 marginal cost on top of the v3 LLM scoring run.
+
+    Requires `ANTHROPIC_API_KEY` env var (already required by v3 LLM scoring).
+    """
+    careers_url = company.get("careers_url")
+    if not careers_url:
+        return [], "missing_careers_url"
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return [], "missing_anthropic_api_key"
+
+    page, err = http_get(careers_url, accept="text/html")
+    if err:
+        return [], f"page_{err}"
+    html = page.decode("utf-8", errors="replace")[:SCRAPE_HTML_LIMIT]
+
+    prompt = (
+        f"Extract job listings from this careers page HTML. "
+        f"Company: {company.get('name', '')}. Page URL: {careers_url}.\n\n"
+        f"Return a JSON array. Each entry: "
+        f"{{\"id\": <stable identifier — job slug or URL fragment>, "
+        f"\"title\": <job title>, "
+        f"\"url\": <full URL to the JD; resolve relatives against page URL>, "
+        f"\"location\": <location string as written>, "
+        f"\"department\": <team/department if visible, else \"\">}}.\n\n"
+        f"Return JSON array only — no prose, no markdown fence. If no jobs found, return [].\n\n"
+        f"HTML:\n{html}"
+    )
+
+    body = json.dumps({
+        "model": company.get("scrape_model", SCRAPE_MODEL_DEFAULT),
+        "max_tokens": SCRAPE_MAX_TOKENS,
+        "messages": [{"role": "user", "content": prompt}],
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        ANTHROPIC_API_URL,
+        data=body,
+        headers={
+            "x-api-key": api_key,
+            "anthropic-version": ANTHROPIC_VERSION,
+            "content-type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            response = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        return [], f"llm_http_{e.code}"
+    except Exception as e:
+        return [], f"llm_error:{e}"
+
+    try:
+        # Anthropic API response: {content: [{type: "text", text: "..."}], ...}
+        content_blocks = response.get("content", [])
+        text = "".join(b.get("text", "") for b in content_blocks if b.get("type") == "text").strip()
+        # Strip markdown fences if the LLM accidentally added them
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text
+            if text.endswith("```"):
+                text = text.rsplit("```", 1)[0]
+        jobs = json.loads(text)
+        if not isinstance(jobs, list):
+            return [], "llm_unexpected_shape"
+        return jobs, None
+    except Exception as e:
+        return [], f"llm_parse:{e}"
+
+
 COMEET_TOKEN_RE  = re.compile(r'"token"\s*:\s*"([^"]+)"')
 COMEET_API       = "https://www.comeet.co/careers-api/2.0/company/{company_id}/positions?token={token}&details=full"
 
@@ -739,6 +829,28 @@ def normalise_homerun(job: dict, company: dict) -> dict:
     }
 
 
+def normalise_scrape(job: dict, company: dict) -> dict:
+    """Pass-through normaliser for LLM-extracted entries (the prompt already
+    asks for canonical-shape fields). Defaults fill in anything missing."""
+    location = str(job.get("location") or "")
+    return {
+        "id":             str(job.get("id", "")),
+        "company":        company["name"],
+        "title":          job.get("title", ""),
+        "url":            job.get("url", ""),
+        "location":       location,
+        "is_remote":      "remote" in location.lower(),
+        "workplace_type": "Remote" if "remote" in location.lower() else "",
+        "department":     job.get("department", "") or "",
+        "published_at":   "",
+        "source":         company.get("source", "unknown"),
+        "ats":            "scrape",
+        "description":    "",  # No JD body fetch in v3.2.0; the orchestrator's compile-write
+                                # can re-fetch the JD URL if it needs more context for scoring.
+        "extraction":     "llm",  # marker so downstream knows this came from scrape, not API
+    }
+
+
 FETCHER_DISPATCH = {
     "ashby":        (fetch_ashby,        normalise_ashby),
     "greenhouse":   (fetch_greenhouse,   normalise_greenhouse),
@@ -746,6 +858,7 @@ FETCHER_DISPATCH = {
     "lever":        (fetch_lever,        normalise_lever),         # v3.1.1
     "teamtailor":   (fetch_teamtailor,   normalise_teamtailor),    # v3.1.1
     "homerun":      (fetch_homerun,      normalise_homerun),       # v3.1.1
+    "scrape":       (fetch_scrape,       normalise_scrape),        # v3.2.0
     "html_static":  (fetch_html_static,  normalise_html_static),
     "static_roles": (fetch_static_roles, normalise_static_role),
 }

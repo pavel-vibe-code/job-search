@@ -215,6 +215,16 @@ ATS_ADAPTERS: dict = {
         "active_ids_fetcher": fetch_active_ids_homerun,
         "active_validate_supported": True,
     },
+    "scrape": {
+        # Generic LLM-extracted careers-page fallback (v3.2.0). Per-favorite opt-in
+        # via {ats: "scrape", careers_url: "..."}. URL pattern is None — never auto-
+        # dispatched from a listing URL; only used when explicitly tagged in favorites.
+        # Validate side: not supported by an API, so candidates fetched via scrape
+        # land as Status: Uncertain in the tracker (user spot-checks).
+        "url_pattern": None,
+        "active_ids_fetcher": None,
+        "active_validate_supported": False,
+    },
 }
 
 
@@ -222,11 +232,16 @@ def ats_from_url(url: Optional[str]) -> Optional[Tuple[str, str]]:
     """Parse a listing URL to derive (ats_name, slug). Returns None if no pattern matches.
 
     Used as the primary dispatch signal in validate-jobs.py and validate-favorites.py.
+    Adapters with `url_pattern: None` (e.g. "scrape") are skipped — they're only
+    matched when explicitly tagged in the favorites entry, not by URL inspection.
     """
     if not url:
         return None
     for ats, adapter in ATS_ADAPTERS.items():
-        m = adapter["url_pattern"].match(url)
+        pattern = adapter.get("url_pattern")
+        if pattern is None:
+            continue
+        m = pattern.match(url)
         if m:
             return ats, m.group(1)
     return None

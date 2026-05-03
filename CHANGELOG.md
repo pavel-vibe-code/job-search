@@ -4,6 +4,43 @@ All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Chang
 
 ---
 
+## [3.2.0] — 2026-05-04
+
+### `scrape` ATS — LLM-extracted careers-page fallback
+
+For companies whose ATS isn't in the supported set (Ashby/Greenhouse/Comeet/Lever/Teamtailor/Homerun), v3.2.0 introduces a generic fallback: per-favorite opt-in via `{ats: "scrape", careers_url: "..."}`. Each Routine fire calls Claude with the careers page HTML and asks for structured extraction.
+
+This expands "supported" from the deterministic-API set to **anything with a public HTML careers page**. Workable, Personio, Recruitee, custom-built careers pages, niche-EU ATSes — all become trackable without writing per-ATS adapters.
+
+### Implementation
+
+- **New** — `fetch_scrape()` in `scripts/fetch-and-diff.py`. Pulls page HTML (truncated to ~50K tokens for cost control), calls Claude API at `api.anthropic.com/v1/messages` with a structured-extraction prompt asking for `{id, title, url, location, department}` per job. Default model: `claude-haiku-4-5-20251001` (cheap; structured extraction doesn't need Opus). Override per-favorite via `scrape_model` field.
+- **New** — `normalise_scrape()` — pass-through normaliser since the LLM prompt already returns canonical shape. Adds `extraction: "llm"` marker so downstream knows this came from scrape, not deterministic API.
+- **Registry entry** — `"scrape"` adapter in `ats_adapters.py` with `url_pattern: None` (never auto-dispatched from listing URL — only matched when explicitly tagged in favorites) and `active_validate_supported: False` (no API to confirm liveness, so scrape candidates go to tracker as `Status: Uncertain` per v2.5.2 envelope).
+- **Wizard updated** — `.claude/skills/setup/SKILL.md` Step 7 favorites flow offers two paths when user provides a careers_url that doesn't match a known ATS pattern: `ats: scrape` (LLM-extract) or `ats: skip` (just remember the URL). Default suggestion is scrape if page looks like a careers listing.
+
+### Cost framing
+
+A typical careers page = 50–200K chars HTML → 12–50K input tokens. With Haiku rates (~$0.80/Mtok input, $4/Mtok output) that's **~$0.01–0.04 per page**. For 5–10 scrape favorites per fire, **~$0.05–$0.40 marginal cost** on top of the v3 LLM scoring. Negligible vs. Opus scoring's $20–30/run. If you want stronger extraction (e.g. for JS-rendered SPAs that produce sparse static HTML), per-favorite override `scrape_model: "claude-sonnet-4-6"`.
+
+### Requirements
+
+- `ANTHROPIC_API_KEY` must be in the environment (already required by v3 LLM scoring path; no new requirement).
+- Page must serve meaningful content to non-JS HTTP clients. Pure-SPA careers pages (Workday-style) won't work — the static HTML returned to a curl-style fetcher is empty shell. For those, the user is better off either (a) finding the underlying API endpoint and adding it as a real ATS adapter, or (b) using `ats: skip` and tracking manually.
+
+### What's NOT in v3.2.0
+
+- **Per-favorite description fetch** — `description` field is empty for scrape entries (the careers page lists titles + URLs but rarely full JD bodies). v3 LLM scoring reads `candidate.description` for match-density assessment; for scrape entries it gets less signal. Future patch: a second-pass fetch of the JD URL for scrape candidates that pass hard exclusions, augmenting the candidate before Pass 3 scoring.
+- **Pagination** — scrape extraction is single-page. Careers pages with >50 active jobs may be truncated. Acceptable for current usage; revisit if we see truncation in the wild.
+- **Caching of LLM responses** — every fire re-extracts even if the page hasn't changed. With weekly cadence and Haiku pricing, the cost is negligible. If we ship daily fires with many scrape favorites, prompt-caching the page HTML (Anthropic's ephemeral cache, 5-min TTL) would help.
+
+### Versions
+
+- Plugin: 3.1.1 → 3.2.0
+- Tests: 172 (no new tests — scrape fetcher requires real Claude API + careers page; integration-tested only)
+
+---
+
 ## [3.1.1] — 2026-05-04
 
 ### Lever, Teamtailor, Homerun fetch + normalise (Pass 1 support)

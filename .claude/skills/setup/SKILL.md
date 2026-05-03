@@ -816,7 +816,11 @@ For each entry:
    
    Store the resolved entry as `{name, ats, slug, careers_url, source: "user_added"}`. URL is preserved even if ats was derived deterministically — it's forward-compatible: if a future version adds Workable/Personio support, the URL is already there to re-parse.
 2. **If careers_url not provided:** fall back to ATS auto-detection (the legacy `validate-favorites.py` slug-variant probing). Store as `{name, ats, slug, source: "user_added"}` with no careers_url field.
-3. **If careers_url provided but URL doesn't match any supported ATS:** store with `ats: "skip"` plus the careers_url. The fetcher will skip but the URL is preserved for future extensibility.
+3. **If careers_url provided but URL doesn't match any supported ATS** (i.e. not on Ashby / Greenhouse / Lever / Comeet / Teamtailor / Homerun): offer the user **two options**:
+   - **`ats: "scrape"`** (v3.2.0+) — generic LLM-extracted careers-page fallback. Set `{name, ats: "scrape", careers_url}`. Each Routine fire calls Claude (Haiku, ~$0.01-0.04 per page) to parse the careers page and extract structured job entries. Validation isn't supported (no API to confirm liveness), so candidates land in the tracker as `Status: Uncertain` for user spot-check.
+   - **`ats: "skip"`** — just record the URL but don't fetch. Useful if the user wants to remember the company but not bother with extraction (e.g. the careers page is JS-heavy and the LLM extractor would struggle, OR they're tracking it manually).
+
+   Ask: *"This company's careers page isn't on a supported ATS. Want me to scrape it with LLM extraction (~$0.01 per fire), or skip fetching and just remember the URL?"* Default suggestion is **scrape** if the page looks like a typical careers listing; skip if it's clearly a single-job blurb or a redirect.
 
 **Local mode:** write the resulting array to `./config/favorites.json` (replacing samples).
 
