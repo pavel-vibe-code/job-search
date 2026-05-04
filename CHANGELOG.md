@@ -4,6 +4,42 @@ All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Chang
 
 ---
 
+## [3.3.0] — 2026-05-04
+
+### New skill: `manage-favorites` (dialogue-based, no JSON editing)
+
+User feedback: editing favorites by pasting into a Notion JSON code block is friction-prone — typos break JSON, no validation feedback, no auto-detection of ATS from URL. Especially painful when cleaning up `ats: skip` entries (auto-detection failures from initial setup) or batch-adding new companies.
+
+`manage-favorites` is an interactive skill that handles add/remove/update/list/cleanup via dialog:
+
+- **Add (single or bulk)**: paste careers page URLs, one per line. The skill calls `ats_adapters.ats_from_url()` (v3.1.0 helper) on each, derives `{ats, slug, careers_url}` deterministically for the 6 supported ATS (Ashby/Greenhouse incl. EU/Comeet/Lever/Teamtailor/Homerun). Falls back to `ats: "scrape"` (v3.2.0) for unsupported ATS or custom domains, or `ats: "skip"` placeholder if the user wants to come back later.
+- **Remove**: by name match (exact or partial). Shows match preview before deletion.
+- **Update**: change one field (ats / slug / careers_url / name) on an existing entry, or paste a new URL to re-derive ATS+slug.
+- **List**: show all favorites sorted by name, grouped by ATS, with skip-count callout. Read-only.
+- **Cleanup walkthrough** (Step 2e): iterate through every `ats: skip` entry one-by-one, offering paste-URL / mark-scrape / remove / skip options per entry. Designed for the post-v3.1.1+v3.2.0 cleanup pass when you want to upgrade legacy auto-detection failures.
+
+### Persistence
+
+- **Cloud mode**: writes the updated array back to the AI 50 Favorites Notion page body (JSON code block), via `notion-api.py update-page --replace-content`.
+- **Local mode**: writes to `./config/favorites.json` (gitignored).
+
+Refreshes `cached-ids.json` via `discover` first (defensive — same pattern as feedback-recycle Step 1; v3.0.3+).
+
+### Edge cases handled
+
+- Hash anchors in URLs preserved (`https://adfin.com/careers#open-positions`)
+- JD-specific URLs vs. careers-index URLs (regex extracts slug correctly from either)
+- Dedup on company name (case-insensitive) before write
+- Companies.json overlap warning (companies.json wins per precedence rule)
+
+### Versions
+
+- Plugin: 3.2.0 → 3.3.0 (minor bump — new skill, additive, no breaking changes)
+- Skills: run-job-search, setup, validate-favorites, recalibrate-scoring, feedback-recycle, **manage-favorites (new)**
+- Tests: 172 (skill is markdown — no Python tests)
+
+---
+
 ## [3.2.0] — 2026-05-04
 
 ### `scrape` ATS — LLM-extracted careers-page fallback
