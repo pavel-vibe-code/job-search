@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Shared ATS adapter registry — single source of truth for ATS support.
 
-Purpose: extracted from validate-jobs.py / validate-favorites.py / fetch-and-diff.py
+Purpose: extracted from validate-jobs.py / validate-favorites.py (legacy slug-variant probing) / fetch-and-diff.py
 in v3.1.0 so adding a new ATS is a one-place change. Each adapter is a dict
 entry that defines:
 
@@ -30,7 +30,7 @@ import urllib.request
 from typing import Callable, Optional, Tuple
 
 
-# HTTP helper — shared with fetch-and-diff.py / validate-jobs.py / validate-favorites.py
+# HTTP helper — shared with fetch-and-diff.py / validate-jobs.py / validate-favorites.py (legacy slug-variant probing)
 USER_AGENT = "Mozilla/5.0 (compatible; ai50-job-search/3.1)"
 TIMEOUT_S  = 20
 
@@ -216,9 +216,17 @@ ATS_ADAPTERS: dict = {
         "active_validate_supported": True,
     },
     "scrape": {
-        # Generic LLM-extracted careers-page fallback (v3.2.0). Per-favorite opt-in
-        # via {ats: "scrape", careers_url: "..."}. URL pattern is None — never auto-
-        # dispatched from a listing URL; only used when explicitly tagged in favorites.
+        # Generic LLM-extracted careers-page fallback. v3.2.0 implemented this in
+        # Python via direct urllib calls to api.anthropic.com (required ANTHROPIC_API_KEY).
+        # v4.0.0 reimplemented as a Claude Code agent (.claude/agents/scrape-extract.md)
+        # so users don't need an API key. Per-company opt-in via {ats: "scrape",
+        # careers_url: "..."} in custom-companies.
+        #
+        # Pipeline shape (v4.0.0): fetch-and-diff.py emits a needs_scraping.json
+        # entry; the search-roles agent dispatches scrape-extract per company in
+        # parallel; scripts/diff-scrape.py computes the new/removed delta against
+        # state. URL pattern is None — never auto-dispatched from a listing URL;
+        # only used when explicitly tagged in custom-companies.
         # Validate side: not supported by an API, so candidates fetched via scrape
         # land as Status: Uncertain in the tracker (user spot-checks).
         "url_pattern": None,
@@ -231,9 +239,9 @@ ATS_ADAPTERS: dict = {
 def ats_from_url(url: Optional[str]) -> Optional[Tuple[str, str]]:
     """Parse a listing URL to derive (ats_name, slug). Returns None if no pattern matches.
 
-    Used as the primary dispatch signal in validate-jobs.py and validate-favorites.py.
+    Used as the primary dispatch signal in validate-jobs.py and validate-favorites.py (legacy slug-variant probing).
     Adapters with `url_pattern: None` (e.g. "scrape") are skipped — they're only
-    matched when explicitly tagged in the favorites entry, not by URL inspection.
+    matched when explicitly tagged in the custom-companies entry, not by URL inspection.
     """
     if not url:
         return None

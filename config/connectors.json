@@ -12,14 +12,14 @@
     "_auth_method_comment": "Set by setup wizard. 'mcp' = use Notion MCP tools (interactive laptop). 'api_token' = scripts/notion-api.py with a Notion integration token (works in Routines too). Null = setup not yet completed.",
 
     "names": {
-      "parent_page":    "AI 50 Job Search",
-      "tracker_db":     "Job Tracker",
-      "hot_list_page":  "Hot Lists",
-      "state_db":       "AI50 State",
-      "profile_page":   "AI 50 Profile",
-      "favorites_page": "AI 50 Favorites"
+      "parent_page":              "AI 50 Job Search",
+      "tracker_db":               "Job Tracker",
+      "hot_list_page":            "Hot Lists",
+      "state_db":                 "AI50 State",
+      "profile_page":             "AI 50 Profile",
+      "extended_companies_page":  "Extended Companies List"
     },
-    "_names_comment": "User-customizable names for the 1 parent page + 2 databases + 3 child pages this plugin creates in your Notion workspace. Defaults are fine for most users. If you change a name AFTER first setup, also rename the corresponding artifact in Notion (or delete it — the runtime will recreate empty shells for tracker/state/hot-list under the new name; profile/favorites pages are NEVER auto-recreated, since they hold your content).",
+    "_names_comment": "User-customizable names for the 1 parent page + 2 databases + 3 child pages this plugin creates in your Notion workspace. Defaults are fine for most users. If you change a name AFTER first setup, also rename the corresponding artifact in Notion (or delete it — the runtime will recreate empty shells for tracker/state/hot-list under the new name; profile/extended-companies pages are NEVER auto-recreated, since they hold your content). Naming history: pre-v4.0.0 the extended_companies_page was named 'AI 50 Favorites' and the key was 'favorites_page'; renamed in v4.0.0 to better reflect the conceptual role (extending the AI 50 baseline with custom-tracked companies).",
 
     "install_method": null,
     "mcp_tool_prefix": null,

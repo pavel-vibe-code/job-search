@@ -1,6 +1,6 @@
 # AI 50 Job Search — Architecture
 
-A Claude Code plugin that runs a weekly job search across the Forbes AI 50 plus user-defined favorite companies, scores results against a personalised rubric, and writes them to the user's Notion workspace. Designed to run unattended as a Cloud Routine.
+A Claude Code plugin that runs a weekly job search across the Forbes AI 50 baseline plus any custom companies the user adds on top, scores results against a CV-grounded categorical rubric, and writes them to the user's Notion workspace. Designed to run unattended as a Cloud Routine.
 
 This document describes how the plugin is built and why. For installation and Routine setup see [INSTALL.md](INSTALL.md). For the changelog see [CHANGELOG.md](CHANGELOG.md).
 
@@ -11,16 +11,20 @@ This document describes how the plugin is built and why. For installation and Ro
 ```
 ┌────────────────────────────────────────────────────────────────────┐
 │ Plugin source (Git, generic, shareable)                             │
-│   skills/             setup, run-job-search, validate-favorites     │
-│   agents/             search-roles, validate-urls,                  │
+│   .claude/skills/     setup, run-job-search, extend-companies,      │
+│                       scrape-page,                                  │
+│                       feedback-recycle, recalibrate-scoring         │
+│   .claude/agents/     search-roles, validate-urls,                  │
 │                       compile-write, notify-hot                     │
 │   scripts/            notion-api.py, fetch-and-diff.py,             │
-│                       validate-jobs.py, build-state-chunks.py       │
+│                       validate-jobs.py, ats_adapters.py (v3.1.0),   │
+│                       build-state-chunks.py, validate-favorites.py, │
+│                       diff-scrape.py                                │
 │   scripts/schemas/    tracker_db.json, state_db.json                │
 │   config/             companies.json (AI 50 list),                  │
 │                       connectors.json (names + auth),               │
-│                       profile.json (sample), favorites.json (sample)│
-│   tests/              150 unit tests for filter logic               │
+│                       profile.json (sample), custom-companies.json (sample)│
+│   tests/              172 unit tests for filter logic               │
 └────────────────────────────────────────────────────────────────────┘
                               │
                               │ install / clone
@@ -48,7 +52,7 @@ This document describes how the plugin is built and why. For installation and Ro
 │   │     • One row per company                                       │
 │   │     • Job IDs in page body (JSON code block, multi-rich_text)   │
 │   ├── 📄 AI 50 Profile (cloud mode only)    (page; JSON in body)    │
-│   └── 📄 AI 50 Favorites (cloud mode only)  (page; JSON in body)    │
+│   └── 📄 Extended Companies List (cloud only) (page; JSON in body)  │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -58,12 +62,12 @@ Per-user data lives in three places: a token file (the secret), `cached-ids.json
 
 ## 2. Two deployment modes
 
-The user picks one during setup. Both run the same pipeline; the difference is where profile / favorites / state live.
+The user picks one during setup. Both run the same pipeline; the difference is where profile / custom-companies / state live.
 
 |                       | **Local mode**                          | **Cloud Routine mode**                       |
 |-----------------------|------------------------------------------|----------------------------------------------|
 | Profile lives at      | `config/profile.json` (in repo)         | "AI 50 Profile" Notion page (JSON in body)   |
-| Favorites live at     | `config/favorites.json` (in repo)       | "AI 50 Favorites" Notion page (JSON in body) |
+| Custom companies at   | `config/custom-companies.json` (gitignored) | "Extended Companies List" Notion page (JSON in body) |
 | State lives at        | `state/companies.json` or Notion DB     | "AI50 State" Notion DB (required)            |
 | Token resolution      | File or env var                          | Env var (`NOTION_API_TOKEN`) — file irrelevant |
 | Setup wizard runs on  | User's laptop, interactively             | One-time on laptop; Routine fires unattended thereafter |
@@ -103,7 +107,7 @@ MCP has nicer ergonomics for one-off interactive sessions — no token to mint, 
 
 ---
 
-## 4. The pipeline — five passes per run
+## 4. The pipeline — six passes per run
 
 ```
 ┌──────────────────┐
@@ -111,7 +115,7 @@ MCP has nicer ergonomics for one-off interactive sessions — no token to mint, 
 │  ~5 seconds      │  P-1  Load connectors.json + sentinel metadata
 │  cold start      │  P-2  MCP prefix re-probe (mcp mode only)
 │                  │  P-3  Resolve Notion IDs (cache → search → recreate)
-│                  │  P-4  Hydrate profile/favorites/state into /tmp/
+│                  │  P-4  Hydrate profile/custom-companies/state into /tmp/
 └──────────────────┘
         │
         ▼
@@ -155,22 +159,34 @@ MCP has nicer ergonomics for one-off interactive sessions — no token to mint, 
 ┌──────────────────┐
 │  Pass 5          │  notify-hot agent:
 │  ~10 seconds     │   • Filter newly-written to score ≥ hot_threshold
-│  hot list digest │   • Format markdown digest
+│  hot list digest │   • Format markdown digest                      (legacy path)
+│                  │   • OR: render High-bucket entries by confidence (v3 path)
 │                  │   • Create child page under hot-list parent
 │                  │   • Always create one (even on "no hot matches")
 └──────────────────┘
         │
         ▼
-   Run summary printed
+┌──────────────────┐
+│  Pass 6          │  feedback-recycle skill (v3.0.5 auto-trigger):
+│  optional        │   • Gate: cloud mode AND profile.cv_json present
+│  ~10-20 seconds  │     AND state/last_recycle.json older than 7 days
+│  feedback loop   │   • Read tracker rows with Match Quality + !Recycled
+│                  │   • Synthesize anti-patterns + few-shot examples
+│                  │   • Append to profile.context / few_shot_examples store
+│                  │   • Mark Recycled = true; write state/last_recycle.json
+└──────────────────┘
+        │
+        ▼
+   Run summary printed (incl. token usage + cost — v3.0.5)
 ```
 
-**Total runtime:** 60-90 seconds for a typical run on 50 companies.
+**Total runtime:** 60-90 seconds for a typical run on 50 companies (Pass 6 adds ~10-20s when it fires; skipped most weeks).
 
 ---
 
 ## 5. Step P-3 — the discovery layer
 
-The most distinctive piece of v2.3 architecture. It replaces "user commits Notion IDs to their fork" with "plugin resolves IDs from names at run time."
+The most distinctive piece of v2.3+ architecture (carried through v3.x unchanged). It replaces "user commits Notion IDs to their fork" with "plugin resolves IDs from names at run time."
 
 ### 5.1 The problem
 
@@ -211,7 +227,7 @@ After resolution, the orchestrator dispatches per-artifact:
 
 **`recreate_ok`** artifacts: parent page, tracker DB, hot-list page, state DB. These are container-only — recreating them just gets you an empty shell, which the next run repopulates from the ATS.
 
-**`abort_if_missing`** artifacts: AI 50 Profile, AI 50 Favorites. These hold user-edited JSON content. Recreating them would silently destroy the user's customizations. Safer to fail loudly.
+**`abort_if_missing`** artifacts: AI 50 Profile, Extended Companies List. These hold user-edited JSON content. Recreating them would silently destroy the user's customizations. Safer to fail loudly.
 
 ### 5.3 Cache file (`state/cached-ids.json`)
 
@@ -222,7 +238,7 @@ After resolution, the orchestrator dispatches per-artifact:
   "hot_list_parent_page_id":   "...",
   "tracker_state_database_id": "...",
   "profile_page_id":           "...",
-  "favorites_page_id":         "...",
+  "extended_companies_page_id": "...",
   "_resolved_at":              "2026-04-30T15:28:29+00:00",
   "_workspace_id":             "9a236f76-66be-813b-b0bb-00033fc4ae8c",
   "_workspace_name":           "Pavel M's Space"
@@ -294,13 +310,15 @@ script: new_jobs (raw diff) ──► agent applies filters ──► candidates
                                                        └─► filtered_out (count only, for stats)
 ```
 
-**Why this split:** classification and scoring lookups are pure functions tested by `tests/test_region.py` + `tests/test_personas.py` (150 unit tests). The agent only orchestrates; correctness of the rules lives in versioned, tested Python.
+**Why this split:** classification and scoring lookups are pure functions tested by `tests/test_region.py` + `tests/test_personas.py` (172 unit tests as of v3.3.0). The agent only orchestrates; correctness of the rules lives in versioned, tested Python.
 
 ---
 
 ## 7. Scoring rubric (Pass 3 details)
 
-> **v3.0 architectural shift.** The structured numeric rubric documented in §7.1–§7.4 below is the **legacy path**, still honored for profiles created by pre-v3 wizards. v3.0 introduces an alternative: hard exclusions filter aggressively (deterministic, free), then surviving candidates get LLM-judged categorical scoring (`High` / `Mid` / `Low`) against a CV-grounded free-text profile. See §7.5 below for the v3 path. The compile-write agent picks the path based on whether `profile.cv_json` is present.
+> **v3.0 architectural shift (now the recommended path).** The structured numeric rubric documented in §7.1–§7.4 below is the **legacy path**, still honored for profiles created by pre-v3 wizards or for users who skip CV upload during setup. v3.0 introduced — and v3.x makes default — hard exclusions filtering aggressively first (deterministic, free), then surviving candidates get LLM-judged categorical scoring (`High` / `Mid` / `Low`) against a CV-grounded free-text profile. The compile-write agent picks the path based on whether `profile.cv_json` is present. See §7.5 below.
+>
+> v3.0.0 also closes the loop with a **Notion-feedback learning layer** — the `feedback-recycle` skill processes user-labeled tracker rows weekly, deriving anti-patterns and few-shot examples that get injected into the next run's Pass 3 LLM prompt. See §7.6.
 
 The setup wizard collects criteria + priorities (high/medium/low) in plain English; the wizard's agent reflects on the input and proposes weights + thresholds. The user approves / adjusts / re-thinks.
 
@@ -432,9 +450,34 @@ The wizard's Q7 free-text answer (already stored as `profile.context`) serves as
 
 **Bucket assignment rule:** Match density between profile attributes and JD requirements drives the bucket, with critical-concern weighting. High = matches dominate AND no critical concerns. Mid = mixed or sparse-JD default. Low = few matches or major requirements unmet. The LLM prompt forces explicit factor enumeration (the `key_factors` field) so bucket assignment is inspectable.
 
-**Cost optimization:** Anthropic prompt caching for the constant profile section. ~200 candidates × constant profile = N-1 cache hits per run.
+**Default model:** Claude Opus 4.7 with extended thinking enabled (`{type: "enabled", budget_tokens: 4000}`). Opus is meaningfully stronger at multi-criteria evaluation and JD-decomposition than Sonnet/Haiku — see CHANGELOG v3.0.2 for the rationale. Users who prefer cost over quality can override via `profile.scoring.instructions: "use sonnet for cost"` (or `"use haiku"`).
+
+**Cost framing:** ~$20–50/run on Opus 4.7 with extended thinking (typical run, ~200 candidates surviving hard exclusions). ~$5–15/run if overridden to Sonnet 4.6. ~$1–2/run on Haiku, with degraded rationale quality. Anthropic prompt caching is mandatory for the constant profile section — N-1 cache hits per run amortize the per-call cost. Run summary prints aggregate token usage + cost estimate per pass (v3.0.5+).
 
 **Backward compat:** profiles without `cv_json` continue using the legacy structured-rubric path documented in §7.1–§7.4.
+
+### 7.6 Feedback-recycle learning loop (Pass 6 — v3.0.0)
+
+The v3 path becomes a learning loop via the `feedback-recycle` skill, auto-triggered as Pass 6 of the orchestrator (gated on cloud mode + `profile.cv_json` present + ≥7 days since last cycle; v3.0.5+).
+
+**Tracker DB columns added in v3.0.0:**
+
+- `Match Quality` (select: `Great` / `OK` / `Bad`) — user feedback. Vocabulary deliberately matches `Match` (LLM verdict) so disagreements are direct comparisons.
+- `Feedback Comment` (rich text) — user explanation, free text.
+- `Recycled` (checkbox) — set true once feedback-recycle has processed this row; prevents double-counting.
+
+**The recycle pipeline:**
+
+1. Read tracker rows where `Match Quality` is set AND `Recycled` is unchecked.
+2. Categorize by agreement / disagreement. Strong disagreements (`High`+`Bad`, `Low`+`Great`) get top weight.
+3. Synthesize anti-patterns from clusters of ≥3 `Bad` entries sharing a pattern → propose to append to `profile.context` (user approves).
+4. Curate 3-5 few-shot examples (`{job, llm_verdict, user_label, comment, lesson}` quads), persist to `state/few_shot_examples.json` (local) or a dedicated Notion page (cloud), capped at 10 — older entries roll off.
+5. Mark each tracker row `Recycled = true`.
+6. Write `state/last_recycle.json` with timestamp + counts (gates the auto-trigger).
+
+The few-shot examples are the highest-leverage piece — they get included in every subsequent Pass 3 LLM scoring prompt, so the model generalizes from concrete labeled cases without the user hand-writing rules.
+
+Manual invocation always works regardless of the auto-trigger gate (e.g. *"recycle feedback"*, *"update profile from labels"*).
 
 ---
 
@@ -515,7 +558,7 @@ Considered but rejected: SQLite, Postgres, S3, GitHub-stored YAML.
 
 Notion wins because:
 - The user already has it (Forbes-AI-50 candidate audience overlaps strongly with Notion users).
-- The data has a usable read/edit UI for free — they edit profile/favorites in Notion the same way they edit any other Notion page.
+- The data has a usable read/edit UI for free — they edit profile/custom-companies in Notion the same way they edit any other Notion page.
 - The Notion API is straightforward, free, and has no rate-limit surprises at this scale.
 - Cloud Routines need durable storage; Notion provides it without any infra.
 
@@ -523,15 +566,21 @@ The trade-off: `rich_text` per-element 2000-char limit forced the multi-element-
 
 ### 10.3 ATS APIs over scraping
 
-Pre-v2.3 used Chrome MCP + JavaScript to scrape SPA-rendered ATS sites (Ashby, Lever). Discovered ~65% false-negative rate for closed-job detection because non-JS clients see only an empty shell.
+Pre-v2.3 used JavaScript-driven scraping of SPA-rendered ATS sites (Ashby, Lever). Discovered ~65% false-negative rate for closed-job detection because non-JS clients see only an empty shell.
 
-Switched to the providers' public posting APIs:
-- Ashby: `api.ashbyhq.com/posting-api/job-board/<slug>`
-- Greenhouse: `boards-api.greenhouse.io/v1/boards/<slug>/jobs`
-- Lever: `api.lever.co/v0/postings/<slug>`
-- Comeet: `www.comeet.com/career-api/...`
+Switched to the providers' public posting APIs. As of v3.1.1, six ATS are first-class supported (fetch + validate via deterministic API), plus a generic LLM-extracted fallback (`scrape`, v3.2.0):
 
-These are public (no auth required for read), well-documented, and stable. The plugin caches no data from them — every run fetches fresh.
+- **ashby** — `api.ashbyhq.com/posting-api/job-board/<slug>`
+- **greenhouse** — `boards-api.greenhouse.io/v1/boards/<slug>/jobs` (classic) and `boards-api.eu.greenhouse.io/...` (EU data residency, v3.1.1). The fetcher tries both hosts so customers like Parloa / JetBrains on the EU subdomain don't silently 404.
+- **lever** — `api.lever.co/v0/postings/<slug>?mode=json` (v3.1.0 validate, v3.1.1 fetch)
+- **comeet** — `www.comeet.com/careers-api/2.0/company/<id>/positions?token=...` (token scraped from the public careers HTML)
+- **teamtailor** (v3.1.1) — `<slug>.teamtailor.com/api/v1/jobs?page[size]=200` (JSON:API)
+- **homerun** (v3.1.1) — `api.homerun.co/v1/jobs/?company_subdomain=<slug>`
+- **scrape** — generic agent-extracted careers-page fallback. For companies whose ATS isn't in the supported set (Workable, Personio, Recruitee, custom-built careers pages), the user opts in per-company via `{ats: "scrape", careers_url: "..."}` in their custom-companies list. Implemented as a Claude Code agent (`.claude/agents/scrape-extract.md`) so users don't need an Anthropic API key — extraction runs against their Claude.ai subscription quota the same way other agents do. (Pre-v1.0.0 internal versions implemented this via direct `urllib` calls to `api.anthropic.com`, which required `ANTHROPIC_API_KEY`; v1.0.0 reimplemented it as an agent.) Pipeline: `fetch-and-diff.py` emits `/tmp/needs_scraping.json`; the `search-roles` agent dispatches `scrape-extract` per company in parallel; `scripts/diff-scrape.py` computes the new/removed delta against state. Standalone use: the `/scrape-page` skill wraps the same agent for ad-hoc extraction-quality testing on a single URL. No deterministic API to validate against, so scrape candidates land as `Status: Uncertain` in the tracker.
+
+These are public (no auth required for read where possible), well-documented, and stable. The plugin caches no data from them — every run fetches fresh.
+
+Adding a new deterministic ATS post-v3.1.0 is a one-place change: add a registry entry to `scripts/ats_adapters.py` (URL pattern + active-id fetcher + `active_validate_supported` flag) and add a fetch + normalize pair to `fetch-and-diff.py`'s `FETCHER_DISPATCH`. See §10.7 below.
 
 ### 10.4 Threaded HTTP via stdlib
 
@@ -539,11 +588,24 @@ These are public (no auth required for read), well-documented, and stable. The p
 
 ### 10.5 Tests: stdlib `unittest`
 
-`tests/run.sh` uses `python3 -m unittest discover` — no pytest install required. 150 tests run in ~3ms. The test layer pins region classification and score-table semantics, which are the two places where bugs hide longest (per the v2.3 retro: both filter bugs were latent in v2.2.x because the tests didn't cover relocation-friendly personas).
+`tests/run.sh` uses `python3 -m unittest discover` — no pytest install required. 172 tests run in ~3ms. The test layer pins region classification and score-table semantics, which are the two places where bugs hide longest (per the v2.3 retro: both filter bugs were latent in v2.2.x because the tests didn't cover relocation-friendly personas). v3.1.0 added URL-pattern + ATS-registry tests as new ATS were folded into `ats_adapters.py`.
 
 ### 10.6 Deterministic CLI helpers + LLM agents for synthesis only
 
 The agents (search-roles, validate-urls, compile-write, notify-hot) do orchestration + LLM-shaped work (writing fit rationales, formatting digests). All deterministic logic — region classification, score tables, ATS fetching, state diffing — lives in Python scripts the agents invoke. This split keeps the hot path testable and reduces compounding-error surface area (see §3 on auth methods).
+
+### 10.7 `ats_adapters.py` — single source of truth for ATS support (v3.1.0)
+
+Earlier development versions duplicated ATS knowledge across three scripts (`validate-jobs.py`, `validate-favorites.py`, `fetch-and-diff.py`). The internal v3.1.0 release extracted ATS knowledge into one shared module: `scripts/ats_adapters.py`. v1.0.0 carried this further by reframing favorites as `extend-companies` (custom-tracked companies on top of the AI 50 baseline) and reimplementing the `scrape` adapter as a Claude Code agent (no API key needed).
+
+The module exports:
+
+- `ATS_ADAPTERS` — registry dict keyed by ATS name. Each entry holds a `url_pattern` regex (with slug capture group), an `active_ids_fetcher` callable, and an `active_validate_supported` flag.
+- `ats_from_url(url)` — primary URL→`(ats_name, slug)` dispatch; returns `None` for URLs matching no pattern. Adapters with `url_pattern: None` (e.g. `scrape`) are skipped — they're only matched when explicitly tagged in a custom-company entry, not by URL inspection.
+- `active_ids_for(ats, slug, **kwargs)` — dispatch to the right fetcher; returns `(set_of_ids, error_or_none)`.
+- `supported_ats_for_validate()` — set of ATS names whose live state can be confirmed via API.
+
+`validate-jobs.py`, `validate-favorites.py`, and the `extend-companies` skill all call `ats_from_url()` to derive `(ats, slug)` from a pasted careers URL. The fetcher counterpart for full job lists (used by Pass 1) lives in `fetch-and-diff.py`'s `FETCHER_DISPATCH` — adding a new deterministic ATS needs both sides registered. The `scrape` ATS is special: registry entry stays for visibility, but `active_ids_fetcher` is `None` (handled by the scrape-extract agent post-fetch via `diff-scrape.py`).
 
 ---
 
@@ -566,8 +628,12 @@ Stage 2 — Optional: Schedule a Cloud Routine    (one-time)
 ─────────────────────────────────────────────────────────────────────────
   1. claude.ai/code/routines → New Routine
   2. Environment: NOTION_API_TOKEN + (optional) NOTION_PARENT_ANCHOR_ID
-  3. Allowed domains: api.notion.com, *.ashbyhq.com, *.greenhouse.io,
-                      *.lever.co, *.comeet.com, surgehq.ai
+  3. Allowed domains: api.notion.com,
+                      *.ashbyhq.com, *.greenhouse.io,
+                      *.lever.co, *.comeet.com,
+                      *.teamtailor.com, *.homerun.co, surgehq.ai
+     (api.anthropic.com is NOT needed in v1.0.0+ — all LLM work runs
+     through Claude Code agents, not direct urllib calls.)
   4. Setup script (~10 lines) — discovers plugin path, creates
      sentinel, runs auth pre-check
   5. Trigger prompt: "Run the AI 50 job search. Non-interactive
@@ -579,9 +645,10 @@ Stage 3 — Ongoing                                (no-op for the user)
   Every Monday at 08:00:
     ├─ Routine container fires
     ├─ Setup script creates sentinel + verifies auth
-    ├─ Plugin runs the 5-pass pipeline (~60s)
+    ├─ Plugin runs the 6-pass pipeline (~60-90s; Pass 6 fires weekly)
     ├─ New qualifying jobs land in Tracker DB
     ├─ Hot-list digest page created with the week's matches
+    ├─ feedback-recycle (when gate met) updates profile from labels
     └─ User checks Notion when ready
 ```
 
@@ -596,7 +663,7 @@ To update the profile or rubric, the user edits the AI 50 Profile Notion page di
 - `config/connectors.json` — `notion.names` (default artifact names) + `auth_method` slot (set during setup)
 - `config/companies.json` — the AI 50 list with ATS details (slugs, etc.)
 - `config/profile.json` — sample data for local-mode template
-- `config/favorites.json` — sample data
+- `config/custom-companies.json` — sample data (gitignored on per-user installs)
 - `scripts/schemas/{tracker_db,state_db}.json` — Notion DB schemas
 
 ### 12.2 What the user generates
@@ -609,7 +676,7 @@ To update the profile or rubric, the user edits the AI 50 Profile Notion page di
 ### 12.3 What lives in Notion
 
 - Profile page body — JSON code block, full profile
-- Favorites page body — JSON code block, array of favorites
+- Extended Companies List page body — JSON code block, array of custom-tracked companies
 - State DB rows — per-company job IDs
 - Tracker DB rows — per-job entries
 - Hot Lists child pages — weekly digests
@@ -618,13 +685,13 @@ To update the profile or rubric, the user edits the AI 50 Profile Notion page di
 
 ## 13. Versioning
 
-Plugin uses semantic-ish versioning. Currently 2.3.0.
+Plugin uses semantic-ish versioning. Currently **v3.3.0** (public release candidate).
 
-- **Major** bumps for breaking changes to the user-visible flow (e.g. new mandatory setup step, schema migration).
-- **Minor** bumps for new features (e.g. new ATS support) or significant refactors (v2.3 added the discovery layer).
+- **Major** bumps for breaking changes to the user-visible flow (e.g. v3.0's hybrid LLM scoring shift).
+- **Minor** bumps for new features (e.g. new ATS support, new skill) or significant refactors (v2.3 added the discovery layer; v3.1.0 added the shared `ats_adapters` registry).
 - **Patch** bumps for bug fixes.
 
-`plugin.json[version]` is the canonical version. SKILL.md frontmatter versions are kept in sync. CHANGELOG.md describes every release.
+Pre-v2.4.0 the canonical version lived in `plugin.json[version]` at the repo root, and the plugin shipped via the `--plugin-dir` mechanism. v2.4.0 dropped the manifest when the project went **project-scoped under `.claude/`** (skills + agents now live under `.claude/skills/` and `.claude/agents/` and are discovered automatically). The canonical version now lives in CHANGELOG.md's top entry; SKILL.md frontmatter versions are kept in sync per skill (each skill bumps independently when it changes).
 
 ---
 
@@ -633,7 +700,7 @@ Plugin uses semantic-ish versioning. Currently 2.3.0.
 | Failure | Behavior | Recovery |
 |---------|----------|----------|
 | Notion archived parent page | Discover detects, recreate-or-abort policy applies | Set `NOTION_PARENT_ANCHOR_ID` env var |
-| Notion deleted profile/favorites page | Abort with `user_content_missing` | Re-run setup wizard |
+| Notion deleted profile / extended-companies page | Abort with `user_content_missing` | Re-run setup wizard |
 | Notion API outage | Compile-write/notify-hot emit fallback files; orchestrator writes markdown to `outputs/` | Investigate; next run retries |
 | ATS endpoint down | Fetch-and-diff records error in `fetch_errors`, continues with other companies | Self-healing on next run |
 | Token rotated to different workspace | Workspace-ID sanity check invalidates cache | Discover re-resolves cleanly |
@@ -641,9 +708,11 @@ Plugin uses semantic-ish versioning. Currently 2.3.0.
 
 ### Known limitations (roadmap)
 
-- `removed_jobs_pending` (closures the agent didn't reach before failing) currently relies on the next run's diff to re-surface the same removed_jobs. Edge case: if a job is briefly re-listed and re-removed in the gap, the close-mark is lost. v2.4 may add a durable `state/pending-closures.json` queue.
+- `removed_jobs_pending` (closures the agent didn't reach before failing) currently relies on the next run's diff to re-surface the same removed_jobs. Edge case: if a job is briefly re-listed and re-removed in the gap, the close-mark is lost. A durable `state/pending-closures.json` queue is on the backlog.
 - No retry policy at the agent level on transient 5xx — the orchestrator-level fallback handles this, but a per-call retry inside the agent would be tighter.
-- Cloud Routine env-var visibility: `NOTION_API_TOKEN` is visible to anyone with edit access on the routine. Document the rotation cadence.
+- Cloud Routine env-var visibility: `NOTION_API_TOKEN` is visible to anyone with edit access on the routine. Rotate periodically if you share access. (No `ANTHROPIC_API_KEY` is set in v1.0.0+ — the scrape ATS runs as a Claude Code agent against your Claude.ai subscription quota, not a direct API call.)
+- Scrape adapter (`ats: scrape`) is single-page and HTML-only. Pure-SPA careers pages (Workday-style) return empty shells to non-JS clients (the scrape-extract agent surfaces this as `extraction_quality: "no_static_content"`); the user is better off finding the underlying API endpoint and adding a real ATS adapter, or marking the company `ats: skip`.
+- Token usage tracking (v3.0.5) is print-only — not persisted to a Notion Run Log or local jsonl. Trend analysis over time requires manual copy-paste into a spreadsheet.
 
 ---
 
@@ -661,7 +730,7 @@ tests/
   test_normalise.py       Job-shape canonical form
 ```
 
-150 tests total, runs in <1 second. No external dependencies. Run on every change to `scripts/fetch-and-diff.py` or related logic.
+172 tests total (v3.3.0), runs in <1 second. No external dependencies. Run on every change to `scripts/fetch-and-diff.py`, `scripts/ats_adapters.py`, or related logic. v3.1.0 added URL-pattern + ATS-registry tests as Lever / Teamtailor / Homerun were folded into the shared adapter module.
 
 The persona-scenario suite (`test_personas.py`) was the v2.3 retro fix: pre-v2.3, tests covered only the Prague-Pavel home region. Filter bugs that affected EU-relocation personas slipped through. The new suite pins eight common candidate archetypes (home-city / home-region / multi-region / global-remote / on-site-only / etc.) so future archetype-specific bugs are caught.
 

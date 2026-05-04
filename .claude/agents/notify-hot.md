@@ -125,7 +125,9 @@ Read `./config/connectors.json` only for:
 - **v3 path (profile has `cv_json`):** Hot = entries with `Match: "High"`. No threshold tuning. Order by `confidence` (high → first).
 - **Legacy path (no `cv_json`):** Hot = entries where `fit_score >= hot_score_threshold`.
 
-If zero jobs are hot, still create the digest — just note "No hot matches this run" in the document. Do not skip creating the document.
+**Empty-run skip (v3.4.0+):** If `len(hot_jobs) == 0` AND there are no static-roles notifications AND no external-companies entries to surface, **skip page creation**. Return `{"hot_matches": 0, "document_created": false, "document_url": null, "connector_status": "skipped_empty"}`. The orchestrator logs "no hot matches this run" inline. Rationale: weekly fires that produce zero hot matches would otherwise junk the user's Notion with empty digest pages.
+
+If hot jobs > 0, OR there ARE static notifications / external companies to surface (even with zero hot), proceed with Step 3 and create the digest.
 
 ## Step 3 — Format the digest
 
@@ -167,9 +169,6 @@ Run: AI 50 + Favorites | {N} companies checked | {N} new jobs added | {N} hot ma
 ---
 
 [Score {score}] ...
-
----
-No hot matches this run.  ← only if zero hot jobs
 ```
 
 Keep it tight — this is a quick-scan document, not a full analysis. Each entry should be readable in 10 seconds.

@@ -7,7 +7,7 @@ description: >
   "scan for jobs", "check for new roles", "run AI 50 search", "update my job tracker",
   "find jobs", "what's new on the AI 50 list".
 metadata:
-  version: "2.3.0"
+  version: "3.4.0"
   author: "Pavel Malyshev"
   edition: "Claude Code / Routines"
 ---
@@ -40,7 +40,7 @@ In a **Cloud Routine** the sentinel is reset on every cold start; the Routine se
 
 ### Step P-1 — Confirm config files exist
 
-1. Confirm `./config/connectors.json` and `companies.json` exist and parse as valid JSON. (`profile.json` and `favorites.json` may be local-only — they're hydrated from Notion in cloud mode, see P-3.)
+1. Confirm `./config/connectors.json` and `companies.json` exist and parse as valid JSON. (`profile.json` and `custom-companies.json` may be local-only — they're hydrated from Notion in cloud mode, see P-3.)
 2. Read `connectors.json[connector_type]`. For Routine compatibility this should be `"notion"` (markdown is fallback only).
 3. Read `./state/.setup_complete` to determine `deployment_mode` (cloud / local) and `auth_method` (mcp / api_token).
 
@@ -55,7 +55,7 @@ Skip this step entirely if `auth_method == "api_token"`.
 
 ### Step P-3 — Resolve Notion artifact IDs (cloud connector only)
 
-The plugin's 6 Notion artifacts (parent page, tracker DB, hot-list page, state DB, profile page, favorites page) need their IDs resolved before the pipeline can run. We use a 3-tier approach: cache → discover-by-name → recreate.
+The plugin's 6 Notion artifacts (parent page, tracker DB, hot-list page, state DB, profile page, extended-companies page) need their IDs resolved before the pipeline can run. We use a 3-tier approach: cache → discover-by-name → recreate.
 
 ```bash
 python3 ./scripts/notion-api.py discover \
@@ -108,12 +108,12 @@ The script returns JSON with one entry per artifact. Each entry has:
 
 4. **After creation**, re-run `notion-api.py discover` to pick up the new IDs into `cached-ids.json`. (Cheaper alternative: write the new ID directly into the cache file using the same field-name convention as `DISCOVER_KEYS` in `notion-api.py` — but the discover-after-create path is simpler and verifies the result.)
 
-**Aborting on `abort_if_missing` (profile_page, favorites_page):** print
+**Aborting on `abort_if_missing` (profile_page, extended_companies_page):** print
 
 ```
 ERROR: AI 50 Profile / AI 50 Favorites page is missing or inaccessible.
 
-These pages contain your profile and favorites JSON — recreating them
+These pages contain your profile and custom-companies JSON — recreating them
 empty would lose your customizations. Please:
   1. Open Notion and check whether the page was archived or deleted.
   2. If lost, re-run 'set up the plugin' to recreate from scratch.
@@ -122,11 +122,11 @@ empty would lose your customizations. Please:
 
 Then exit non-zero. Do NOT proceed to hydration.
 
-After this step, all six IDs (or all four if local mode without profile/favorites pages) are populated in `state/cached-ids.json` and ready for use by subsequent steps.
+After this step, all six IDs (or all four if local mode without profile / extended-companies pages) are populated in `state/cached-ids.json` and ready for use by subsequent steps.
 
 ### Step P-4 — Hydrate user data into /tmp/
 
-`deployment_mode` (read in P-1) determines whether profile/favorites come from Notion or local files.
+`deployment_mode` (read in P-1) determines whether profile/custom-companies come from Notion or local files.
 
 All page/DB IDs in this section come from `state/cached-ids.json` (resolved in Step P-3).
 
@@ -141,9 +141,9 @@ If parsing fails (page edited to invalid JSON, missing code block), abort with:
 
 #### Favorites
 
-**Cloud mode:** fetch the page at `cached-ids.favorites_page_id`, extract the JSON code block (array of favorite-company objects), write to `/tmp/favorites.json`. If the array is empty, write `[]`.
+**Cloud mode:** fetch the page at `cached-ids.extended_companies_page_id`, extract the JSON code block (array of custom-tracked company objects), write to `/tmp/custom-companies.json`. If the array is empty, write `[]`.
 
-**Local mode:** no action needed — scripts read `./config/favorites.json` directly.
+**Local mode:** no action needed — scripts read `./config/custom-companies.json` directly.
 
 #### State
 
@@ -209,10 +209,10 @@ Write to `/tmp/ai50-state.json`. If empty database, write `{}`.
 Invoke **search-roles**. In **cloud mode**, pass all three hydrated paths:
 
 ```
---state-file /tmp/ai50-state.json --profile-file /tmp/profile.json --favorites-file /tmp/favorites.json
+--state-file /tmp/ai50-state.json --profile-file /tmp/profile.json --custom-companies-file /tmp/custom-companies.json
 ```
 
-In **local mode**, pass only `--state-file /tmp/ai50-state.json` (the script defaults profile/favorites to the repo paths).
+In **local mode**, pass only `--state-file /tmp/ai50-state.json` (the script defaults profile / custom-companies to the repo paths).
 
 Prompt:
 > "Run fetch-and-diff.py with the flags above to fetch all configured ATS endpoints in parallel, diff against stored state, and filter new jobs by profile keywords and location rules. Return: `candidates` (filter-passed), `filtered_out` (filter-rejected, for stats only), `removed_jobs` (the script's diff-based removed array — `[]` on first run, never anything else), `static_notifications`, `external_companies`, `skipped_companies`, and the path to the updated state file. **Do NOT conflate `filtered_out` with `removed_jobs`** — only the latter goes to compile-write for tracker-Closed updates. The script supports `--help` if you need to see all flags."
@@ -223,23 +223,23 @@ Supported ATS types: `ashby`, `greenhouse`, `comeet`, `html_static`, `static_rol
 
 ### Pass 2 — URL Validation (validate-urls agent)
 
-Write the `candidates` array from Pass 1 to a file (e.g. `/tmp/pass2-candidates.json`), then invoke **validate-urls** with the path AND the same companies/favorites files Pass 1 used (NOT plugin_root defaults — see v3.0.6 note below):
+Write the `candidates` array from Pass 1 to a file (e.g. `/tmp/pass2-candidates.json`), then invoke **validate-urls** with the path AND the same companies / custom-companies files Pass 1 used (NOT plugin_root defaults — see historical note below):
 
-> "Run validate-jobs.py on `/tmp/pass2-candidates.json`, passing `--companies-file <same-as-Pass-1>` and `--favorites-file <same-as-Pass-1>`. Returns live / closed / uncertain. Pass `live` AND `uncertain` forward to compile-write — uncertains get written to the tracker with `Status: Uncertain` so the user can spot-check them in Notion. Closed entries don't get passed (they're handled separately as removed_jobs from Pass 1's diff)."
+> "Run validate-jobs.py on `/tmp/pass2-candidates.json`, passing `--companies-file <same-as-Pass-1>` and `--custom-companies-file <same-as-Pass-1>`. Returns live / closed / uncertain. Pass `live` AND `uncertain` forward to compile-write — uncertains get written to the tracker with `Status: Uncertain` so the user can spot-check them in Notion. Closed entries don't get passed (they're handled separately as removed_jobs from Pass 1's diff)."
 
 **Cloud mode flag values:**
 ```
 --companies-file /tmp/companies.json    (Notion-hydrated, same as Pass 1)
---favorites-file /tmp/favorites.json    (Notion-hydrated, same as Pass 1)
+--custom-companies-file /tmp/custom-companies.json    (Notion-hydrated, same as Pass 1)
 ```
 
 **Local mode flag values (or omit for plugin_root defaults):**
 ```
 --companies-file ./config/companies.json
---favorites-file ./config/favorites.json
+--custom-companies-file ./config/custom-companies.json
 ```
 
-**Why this matters (v3.0.6 fix).** Pre-v3.0.6, `validate-jobs.py` hardcoded its index source to `plugin_root/config/{companies,favorites}.json`. In cloud mode that's the **shipped template** (generic Scaling Europe 50 sample data). The user's actual favorites live in Notion, hydrated to `/tmp/favorites.json` by P-4. Pass 1 used the hydrated data; Pass 2 used the template; user-added favorites (Parloa, Nebius, JetBrains, Make, etc.) silently became `company_name_not_in_index` in Pass 2 even though Pass 1 happily fetched their jobs. v3.0.6 makes the file paths explicit args; orchestrator passes the same paths to both passes.
+**Why this matters (historical bug, fixed v3.0.6).** Earlier versions of `validate-jobs.py` hardcoded its index source to `plugin_root/config/{companies,custom-companies}.json`. In cloud mode that's the **shipped template** (generic baseline). The user's actual custom-tracked companies live in Notion, hydrated to `/tmp/custom-companies.json` by P-4. Pass 1 used the hydrated data; Pass 2 silently used the template; custom-tracked companies (Parloa, Nebius, JetBrains, Make, etc.) became `company_name_not_in_index` in Pass 2 even though Pass 1 happily fetched their jobs. v3.0.6 made the file paths explicit args; orchestrator passes the same paths to both passes.
 
 **Why uncertains now get written (v2.5.2):** Pre-v2.5.2, uncertains were dropped at this boundary — only `live` went forward. But Pass 4 still persisted their job IDs to state, which meant the next run's diff treated them as "seen" and they were silently consumed. User never saw them. Now uncertains travel with live to compile-write and land in the tracker with a distinct status, preserving review opportunity.
 
@@ -373,7 +373,7 @@ Mismatch = silent truncation; abort the run with a clear error citing the failin
 **Else (local file backend):**
 - Copy `/tmp/ai50-state.json` back to `./state/companies.json`.
 
-Note: profile and favorites are **read-only** during a run, even in cloud mode. The user updates them by editing the Notion pages directly between runs. Do not write profile/favorites back to Notion in any pass.
+Note: profile and custom-companies are **read-only** during a run, even in cloud mode. The user updates them by editing the Notion pages directly between runs (or via the `extend-companies` skill). Do not write profile / custom-companies back to Notion in any pass.
 
 ### Pass 5 — Hot List (notify-hot agent)
 
@@ -393,7 +393,7 @@ Prompt:
 >
 > On Notion-create failure: abort and report; do NOT silently fall back to markdown. The orchestrator handles fallback."
 
-If newly written jobs list is empty AND no static notifications AND no external companies: still invoke notify-hot — it creates a "No hot matches this run" digest so there's always a dated record of the run executing.
+**Empty-run skip (v3.4.0+):** if newly written jobs list is empty AND no static notifications AND no external companies: still invoke notify-hot, but expect it to return `{"hot_matches": 0, "document_created": false, "connector_status": "skipped_empty"}`. Do NOT create a digest page in that case — log "no hot matches this run" inline in the run summary instead. Pre-v3.4.0 behavior was to create an empty digest page every run; that junked the user's Notion with ~52 empty pages/year.
 
 **Failure handling — markdown fallback contract:** if notify-hot's response contains `{"error": ..., "fallback_file": "/tmp/notify-hot-failed.json"}` (see `agents/notify-hot.md` § Failure contract):
 
@@ -450,7 +450,7 @@ State: {Notion DB ✓ | local file ✓}
 Hot list: {Notion page URL or file path}
 Tracker connector: {connected / fallback}
 
-━━━ Token usage (v3.0.5+) ━━━
+━━━ Token usage ━━━
 Pass 3 (compile-write):     {input}K input ({cache_read}K cached), {output}K output  | model: {model}{ + thinking budget}
 Pass 5 (notify-hot):        {input}K input, {output}K output                            | model: {model}
 Pass 6 (feedback-recycle):  {input}K input, {output}K output                            | model: {model}
@@ -458,6 +458,8 @@ Pass 6 (feedback-recycle):  {input}K input, {output}K output                    
 ─────
 Total:    {total_input}K input ({total_cache_read}K cached), {total_output}K output
 Estimated cost: ${X.XX} ({per-pass breakdown if multi-model})
+
+If no LLM calls were made this run (e.g. zero candidates, all hard-excluded), print "Token usage: no LLM calls this run" instead of the breakdown above.
 
 Static-roles notifications (low-confidence, not saved to tracker):
   • {Company}: {Title} — {one-line role description}
@@ -487,49 +489,18 @@ Sum across passes for total run cost. Round to 2 decimal places in display.
 
 If a pass returns `usage: null` (e.g. notify-hot in legacy path that just renders templates without LLM calls): omit it from the breakdown and skip it in the aggregate.
 
-If `usage` is missing entirely (pre-v3.0.5 agent that doesn't return the envelope): print *"(usage data unavailable — agent pre-v3.0.5)"* in that pass's row rather than crashing on missing keys. Pass 6 in run-job-search SKILL.md ships v3.0.5+; older agents in cache should be invalidated by the next clone.
+If `usage` is missing entirely from a pass response (older agent format): omit that pass's row entirely from the display rather than printing partial/garbled output. Don't print version stamps inline — they confuse the user-facing summary.
+
+If ALL passes have null/missing usage (e.g. early-exit run with no LLM activity), print one line: `Token usage: no LLM calls this run` and omit the table.
 
 ---
 
-## First-time setup (Claude Code)
+## First-time setup
 
-Run these once before the first Routine execution:
+Setup is a one-time interactive flow. From inside the cloned repo, run `claude` and then say `"set up the plugin"` — the wizard handles profile collection, Notion auth, and database creation.
 
-```bash
-# 1. Add Notion MCP
-claude mcp add notion --transport sse https://mcp.notion.com/sse
+For Cloud Routine setup (allowed domains, env vars, setup script, schedule, trigger prompt) see **[INSTALL.md §3](../../../INSTALL.md)**. The orchestrator's runtime contract for Routine context is:
 
-# 2. Load the plugin
-claude --plugin-dir ./job-search
-
-# 3. Run setup
-# Run: "set up the plugin" (creates Notion databases automatically if Notion MCP is connected)
-
-# 4. First search
-# Run: "run the job search" (first run — all jobs treated as new)
-```
-
-**Create a Routine** at [claude.ai/code/routines](https://claude.ai/code/routines):
-- Trigger / prompt: see "Routine prompt" below
-- Schedule: weekly (e.g. every Monday 08:00)
-- Plugin: `job-search`
-- **Environment** (claude.ai/code → Settings → Environments):
-  - `NOTION_API_TOKEN=ntn_...` (your integration token)
-  - `NOTION_PARENT_ANCHOR_ID=<32-char-page-id>` (optional but recommended) — a Notion page ID under which the plugin can recreate the entire hierarchy if `parent_page` ever goes missing. Without this, the Routine ABORTS on missing parent (since there's no human to ask for an anchor). Pick any page in your workspace where the plugin's integration has access; the plugin will create a child page named per `connectors.json[notion.names.parent_page]` if needed.
-- **Allowed domains:** `api.notion.com`, `*.ashbyhq.com`, `*.greenhouse.io`, `*.lever.co`, `*.comeet.com`, `surgehq.ai`
-- **Permission allowlist** — shipped in `.claude/settings.json` at the repo root (committed since v2.3.1). The Routine clones it with the rest of the repo and applies it automatically. Bash patterns for plugin scripts + Read/Write/Edit rules for `state/`, `outputs/`, `/tmp/`, plus Read of `config/` and `scripts/schemas/`. See `.claude/settings.json` for the canonical list.
-- **Setup script** (Routine env config): create the sentinel + run an auth pre-check.
-  ```bash
-  NOTION_API=$(find / -path '*/scripts/notion-api.py' -type f 2>/dev/null | head -1)
-  PLUGIN_ROOT=$(dirname "$(dirname "$NOTION_API")")
-  mkdir -p "$PLUGIN_ROOT/state"
-  DATE=$(date +%Y-%m-%d)
-  printf '{"setup_completed":"%s","method":"routine","deployment_mode":"cloud","auth_method":"api_token"}\n' "$DATE" > "$PLUGIN_ROOT/state/.setup_complete"
-  echo "Setup OK; plugin root: $PLUGIN_ROOT"
-  ```
-  No auth pre-check here — the setup-script context can't see custom env vars (Routine quirk; see INSTALL.md §3.2c). Auth fails loudly at the orchestrator's first Notion call instead.
-
-**Routine prompt:**
 ```
 Run the AI 50 job search.
 

@@ -1,54 +1,57 @@
 ---
-name: manage-favorites
-description: Add, remove, or update entries in the user's AI 50 Favorites list — interactive dialogue, no JSON editing. Auto-detects ATS from pasted careers-page URLs via the v3.1.0 ats_adapters registry. Supports bulk-paste of URLs (all-at-once add) and inline editing. Persists changes to Notion (cloud mode) or config/favorites.json (local mode). Invoke when the user says "manage favorites", "add a favorite", "remove a favorite", "change favorites", "edit favorites", or similar phrasing.
-version: 3.3.0
+name: extend-companies
+description: Add, remove, or update companies on top of the AI 50 baseline — interactive dialogue, no JSON editing. Auto-detects ATS from pasted careers-page URLs via the ats_adapters registry. Supports bulk-paste of URLs (all-at-once add) and inline editing. Persists changes to Notion (cloud mode) or config/custom-companies.json (local mode). Invoke when the user says "extend companies", "add company", "add custom company", "remove company", "change tracked companies", "edit my companies list", "manage companies", or similar phrasing.
+version: 4.0.0
 ---
 
 ## What this skill does
 
-Replaces the friction-prone "edit the JSON code block in the Notion AI 50 Favorites page" workflow with an interactive dialog:
+The plugin tracks the Forbes AI 50 baseline (`config/companies.json`) by default. Users can extend that list with any number of additional companies they want to track on top — that's what this skill manages.
+
+Replaces the friction-prone "edit a JSON code block in Notion" workflow with an interactive dialog:
 
 - **Add**: paste a careers-page URL → skill derives ATS+slug deterministically, proposes the entry, confirms, saves.
 - **Bulk add**: paste several URLs (one per line) → skill processes each, shows a single confirmation diff, saves all atomically.
 - **Remove**: by name match (exact or partial), with confirmation showing what'll be removed.
 - **Update**: change ATS / slug / careers_url for an existing entry without retyping the rest.
-- **List**: show current favorites in readable form with summary stats (N entries, M with `ats: skip`, etc.) — useful before deciding what to change.
+- **List**: show all custom-tracked companies in readable form with summary stats (N entries, M with `ats: skip`, etc.) — useful before deciding what to change.
+- **Cleanup walkthrough**: iterate through every `ats: skip` entry one-by-one to upgrade or remove.
 
-The skill knows about the v2.5.0 `careers_url` field and the v3.2.0 `scrape` ATS, so it composes properly-formed entries that the rest of the pipeline (fetch-and-diff, validate-jobs) consumes correctly.
+The skill composes properly-formed entries for the 6 supported ATSes (Ashby, Greenhouse incl. EU subdomain, Lever, Comeet, Teamtailor, Homerun) plus the `scrape` fallback (Claude Code agent extraction, no API key needed) and the `skip` placeholder (URL remembered, not fetched). Companies you add via this skill are merged with the AI 50 baseline at fetch time; baseline wins on name conflicts.
 
 ## When NOT to invoke
 
-- Initial setup of the plugin — that's the `setup` skill's job (Step 7 collects favorites as part of the wizard flow).
-- Bulk re-categorization of >50 entries — at that scale, dump-and-reload via direct JSON edit is faster than dialog. (Threshold judgment call; ask user if you're unsure.)
-- The user wants to permanently delete a favorite from history — this skill removes from the active list but doesn't audit-trail. Soft delete only.
+- Editing the AI 50 baseline (`config/companies.json`) — that's a contributor-only file shipped with the plugin. Custom companies live in your custom list, separate from the baseline.
+- Bulk re-categorisation of >50 entries — at that scale, dump-and-reload via direct JSON edit is faster than dialog. (Threshold judgment call; ask user if you're unsure.)
+- The user wants to permanently delete an entry from history — this skill removes from the active list but doesn't audit-trail. Soft delete only.
 
 ## Step 0 — Determine deployment mode + load context
 
 Read `state/.setup_complete[deployment_mode]`:
-- `"cloud"` — favorites live in the **AI 50 Favorites Notion page** body (JSON code block). Source-of-truth.
-- `"local"` — favorites live in `./config/favorites.json` (gitignored since v2.4.0). Source-of-truth.
+- `"cloud"` — custom companies live in the **Extended Companies List** Notion page body (JSON code block). Source-of-truth.
+- `"local"` — custom companies live in `./config/custom-companies.json` (gitignored). Source-of-truth.
 
-Look up the favorites page ID:
+Look up the page ID:
 1. **Run `notion-api.py discover`** first to refresh `state/cached-ids.json` (defensive — same as feedback-recycle Step 1; per-installation caches drift).
-2. Read `state/cached-ids.json[favorites_page_id]`.
+2. Read `state/cached-ids.json[extended_companies_page_id]`.
 
-Load the current favorites array. Cloud: `notion-api.py fetch-page-body --page-id <favorites_page_id>` and parse the JSON code block. Local: `json.load(open('./config/favorites.json'))`.
+Load the current custom-companies array. Cloud: `notion-api.py fetch-page-body --page-id <extended_companies_page_id>` and parse the JSON code block. Local: `json.load(open('./config/custom-companies.json'))`.
 
-If the data has a `_meta` first entry (the v2.x convention): preserve it through writes, but skip it when listing/searching.
+If the data has a `_meta` first entry (legacy from v2.x): preserve it through writes, but skip it when listing/searching.
 
 ## Step 1 — Ask intent
 
 Print:
 
 ```
-━━━ AI 50 Favorites — manage ━━━
-Currently {N} entries ({M} with ats=skip — auto-detection failed for those at setup time)
+━━━ Extended Companies — manage ━━━
+Currently {N} custom-tracked companies on top of the AI 50 baseline ({M} with ats=skip — auto-detection failed for those at setup time)
 
 What would you like to do?
-  1. Add new favorite(s) — paste a careers URL or list of URLs
-  2. Remove a favorite — by name
-  3. Update a favorite — change ATS / slug / careers_url
-  4. List all favorites (sorted) — see what's there
+  1. Add new company/companies — paste a careers URL or list of URLs
+  2. Remove a company — by name
+  3. Update a company — change ATS / slug / careers_url
+  4. List all custom companies (sorted) — see what's there
   5. Cleanup `ats: skip` entries — go through each and either upgrade or remove
 
 Pick a number, or describe what you want in plain English.
@@ -77,7 +80,7 @@ For each line:
 1. **If line looks like a URL**: call `ats_adapters.ats_from_url(line)`:
    - Returns `(ats, slug)` → derive `{name: ?, ats, slug, careers_url: line}`. Ask user to confirm the company name (the URL's slug isn't always the right display name — e.g. `togetherai` should be `Together AI`).
    - Returns `None` → URL doesn't match a known ATS pattern. Offer two options:
-     - `ats: "scrape"` (LLM extraction at fire time, ~$0.01-0.04 per fire)
+     - `ats: "scrape"` (Claude Code agent extraction at fire time — uses your Claude.ai subscription quota; no API key needed)
      - `ats: "skip"` (preserved as a placeholder, doesn't fetch — user can come back later)
 2. **If line is just a name (no URL)**: ask user to paste the careers URL for that company.
 
@@ -93,7 +96,7 @@ Proposed additions ({N} entries):
 Confirm? (yes / let me adjust / cancel)
 ```
 
-On `yes`: append to favorites array, write back to source-of-truth, print success summary.
+On `yes`: append to custom-companies array, write back to source-of-truth, print success summary.
 On `let me adjust`: ask which entry, take the correction, regenerate diff.
 On `cancel`: exit without writes.
 
@@ -102,7 +105,7 @@ On `cancel`: exit without writes.
 Print:
 
 ```
-Which favorite(s) to remove? Type a name (exact or partial match) or "ats=skip" to remove all skip-tagged entries:
+Which company/companies to remove? Type a name (exact or partial match) or "ats=skip" to remove all skip-tagged entries:
 ```
 
 Show match preview before deletion:
@@ -137,10 +140,10 @@ If user pastes a new URL: re-run `ats_from_url` and propose the resulting entry;
 
 ### Step 2d — List
 
-Print all favorites sorted by name, grouped by ATS:
+Print all custom companies sorted by name, grouped by ATS:
 
 ```
-━━━ AI 50 Favorites (64 entries) ━━━
+━━━ Extended Companies (64 entries on top of AI 50 baseline) ━━━
 
 ashby (12):
   • Together AI       slug=togetherai
@@ -176,8 +179,8 @@ For each `ats: skip` entry, in order:
 
 Options:
   1. Paste a careers page URL — I'll auto-detect ATS
-  2. Mark as scrape with a careers URL (LLM extraction every fire)
-  3. Remove this favorite entirely
+  2. Mark as scrape with a careers URL (Claude Code agent extraction every fire — no API key needed)
+  3. Remove this entry entirely
   4. Skip (keep as ats=skip, decide later)
 
 What would you like to do?
@@ -187,7 +190,7 @@ Loop through all skip-tagged entries. Track changes in memory; write back at end
 
 ## Step 3 — Persist changes
 
-Build the updated favorites array:
+Build the updated custom-companies array:
 - Preserve any `_meta` first-entry the original had.
 - Apply add/remove/update mutations.
 - Sort by name (case-insensitive) for display readability when next opened in Notion.
@@ -197,18 +200,18 @@ Write back:
 **Cloud mode:**
 ```bash
 # Wrap the array in a JSON code block (matches what setup wizard wrote originally).
-echo '```json' > /tmp/favorites_new.md
-python3 -c "import json; print(json.dumps(updated_favorites, indent=2, ensure_ascii=False))" >> /tmp/favorites_new.md
-echo '```' >> /tmp/favorites_new.md
+echo '```json' > /tmp/custom_companies_new.md
+python3 -c "import json; print(json.dumps(updated_companies, indent=2, ensure_ascii=False))" >> /tmp/custom_companies_new.md
+echo '```' >> /tmp/custom_companies_new.md
 
 python3 ./scripts/notion-api.py update-page \
-  --page-id <favorites_page_id> \
-  --replace-content /tmp/favorites_new.md
+  --page-id <extended_companies_page_id> \
+  --replace-content /tmp/custom_companies_new.md
 ```
 
 **Local mode:**
 ```bash
-python3 -c "import json; json.dump(updated_favorites, open('./config/favorites.json', 'w'), indent=2, ensure_ascii=False)"
+python3 -c "import json; json.dump(updated_companies, open('./config/custom-companies.json', 'w'), indent=2, ensure_ascii=False)"
 ```
 
 Verify the write by re-reading and confirming the change landed.
@@ -216,27 +219,28 @@ Verify the write by re-reading and confirming the change landed.
 ## Step 4 — Summary print
 
 ```
-━━━ Favorites updated ━━━
+━━━ Extended Companies updated ━━━
 
 Added:    {N entries — list names}
 Removed:  {N entries — list names}
 Updated:  {N entries — list names}
 
-Total favorites: {old_count} → {new_count}
+Total custom-tracked: {old_count} → {new_count}
+(Plus ~50 AI 50 baseline companies — those aren't editable here.)
 
 The next Routine fire (or local "run the job search") will use the updated list.
-{If any added entries are scrape: "Note: scrape entries use Claude Haiku per fire (~$0.01-0.04 each) — see CHANGELOG v3.2.0 for cost framing."}
+{If any added entries are scrape: "Note: scrape entries trigger the scrape-extract Claude Code agent on each fire — billed against your Claude.ai subscription quota (Haiku-equivalent ~$0.01-0.04 per page)."}
 ```
 
 ## Step 5 — Suggest follow-ups
 
-If the user added scrape entries: suggest watching the next Routine fire's tracker output to confirm the LLM extraction quality is acceptable; iterate via this skill if not.
+If the user added scrape entries: suggest watching the next Routine fire's tracker output to confirm the LLM extraction quality is acceptable; iterate via this skill if not. Or run the `scrape-page` skill on the URL first to preview extraction quality before committing to add it.
 
-If they cleaned up many skip entries: print *"Want to recycle feedback after your next fire? The new favorites' jobs will surface in the tracker — labeling a few will train the LLM scoring on this expanded pattern set."*
+If they cleaned up many skip entries: print *"Want to recycle feedback after your next fire? The newly-tracked companies' jobs will surface in the tracker — labeling a few will train the LLM scoring on this expanded pattern set."*
 
 ---
 
-## Token usage tracking (v3.0.5+)
+## Token usage tracking
 
 Track LLM calls if any were made (typically: skill is mostly deterministic — URL regex + JSON manipulation. Only LLM call would be if the user wants help inferring company name from URL or similar). Print usage block in Step 4 summary if `usage > 0`; omit if zero.
 
@@ -244,5 +248,5 @@ Track LLM calls if any were made (typically: skill is mostly deterministic — U
 
 - **User pastes a URL with hash anchor** (e.g. `https://adfin.com/careers#open-positions`): hash anchors are valid in URLs and don't affect ATS detection — pass the URL through as-is to `ats_from_url`. The hash is preserved in `careers_url`.
 - **User pastes a JD-specific URL instead of careers index** (e.g. `boards.greenhouse.io/cohere/jobs/12345` instead of `boards.greenhouse.io/cohere`): the regex extracts the slug correctly (group 1 = `cohere`); the `careers_url` field is set to the JD-specific URL. fetch-and-diff calls the API with the slug regardless of what the user-facing URL points at, so this works. Optionally normalize careers_url to the index page for tidiness.
-- **Same company added twice**: dedup by name (case-insensitive) before write. Show user *"You already have Cohere in favorites — update existing entry?"*
-- **Company is in companies.json (the AI 50 baseline) AND user adds it as favorite**: warn user — companies.json wins per fetch-and-diff precedence, so the favorites entry would be ignored. Suggest skipping or use companies.json updates instead (rare case, just the AI 50 list anyway).
+- **Same company added twice**: dedup by name (case-insensitive) before write. Show user *"You already track Cohere — update existing entry?"*
+- **Company is already in companies.json (the AI 50 baseline) AND user adds it as custom**: warn user — the baseline wins per fetch-and-diff precedence, so the custom entry would be ignored. Suggest skipping or use companies.json updates instead (rare case, just the AI 50 list anyway).

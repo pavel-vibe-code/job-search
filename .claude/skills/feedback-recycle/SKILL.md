@@ -210,6 +210,6 @@ Manual invocation always works regardless of the auto-trigger gate.
 
 - v3.1: extracted_keywords from CV gets updated based on which keywords appeared in user-labeled-Greats. The CV-extracted-keywords list becomes self-tuning.
 - v3.2: confidence calibration — if LLM consistently emits `confidence: high` on entries the user labels Bad, prompt-tune to reduce confidence on similar patterns.
-- v4.0+: cross-user shared anti-pattern store (opt-in, anonymous) — community-level learning of what doesn't work.
+- post-v1.0 backlog: cross-user shared anti-pattern store (opt-in, anonymous) — community-level learning of what doesn't work.
 
 These are speculative future work; v3.0.0 ships only the within-single-user feedback-recycle described in Steps 1-5.

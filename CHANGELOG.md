@@ -1,6 +1,122 @@
 # Changelog
 
-All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses semantic-ish versioning (MAJOR.MINOR.PATCH where PATCH bumps land alongside in-place edits to the v2.2.0 plugin folder).
+All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+**Versioning:** v1.0.0 is the first public release. Pre-v1.0.0 development is preserved in git log and the historical tags `v2.3.0` → `v3.3.0`, which remain on the repo as a development trail. Public release cadence starts at v1.0.0; future releases bump v1.x.x.
+
+---
+
+## [1.0.0] — 2026-05-04 — first public release
+
+**Architecture milestone.** Reframes favorites as "extended companies", reimplements scrape ATS as a Claude Code agent (no API key required), and bundles the doc-accuracy + bug-fix work iterated through pre-public development.
+
+### Reframe: favorites → extended companies
+
+User feedback: "favorites" was internal jargon that didn't reflect the actual mental model. The plugin tracks the AI 50 baseline by default; "favorites" was actually *custom companies you extend the baseline with*. Rename throughout for clarity:
+
+- **Skill**: `manage-favorites` → `extend-companies` (directory + frontmatter + trigger phrases). Trigger phrases now: *"extend companies"*, *"add company"*, *"manage companies"*, etc.
+- **Notion page**: "AI 50 Favorites" → "Extended Companies List". `connectors.json` key `favorites_page` → `extended_companies_page`.
+- **Local file**: `config/favorites.json` → `config/custom-companies.json`. The legacy filename is still accepted as a fallback by `fetch-and-diff.py` and `validate-jobs.py` for in-place upgrades from pre-v1.0.0 installs.
+- **Tracker `Source` column**: values `"ai50"` / `"favorites"` → `"ai50"` / `"custom"`.
+- **CLI flags**: `--favorites-file` → `--custom-companies-file` (legacy flag preserved as alias on `fetch-and-diff.py` and `validate-jobs.py`).
+- **Internal terminology** in skills, agents, scripts, docs: "favorites" → "custom companies" / "extended companies" depending on context. Historical references (e.g. validate-favorites.py filename, pre-v1.0.0 changelog entries) preserved verbatim.
+
+### Setup wizard Step 7 reshaped
+
+Earlier development: Step 7 went straight into "paste favorite URLs". v1.0.0: Step 7 first asks the user whether to add custom companies *now* (paste URLs) or *later* (skip and use the `extend-companies` skill on demand). Most users picking "skip" reach the first run faster; power users who want to track specific companies upfront can still opt in. After either path, the wizard prints a hint about the `extend-companies` skill so users know where to find the flow later.
+
+### Scrape ATS reimplemented as Claude Code agent
+
+Earlier development (introduced internal v3.2.0): scrape called `api.anthropic.com/v1/messages` directly from `fetch-and-diff.py` via `urllib.request` with `x-api-key` header. Required `ANTHROPIC_API_KEY` env var. The `fetch_scrape()` docstring claimed this was "already required by v3 LLM scoring" — that was wrong; the scoring agents (compile-write, notify-hot, feedback-recycle) run as Claude Code agents and use Claude as their substrate, not direct API calls.
+
+v1.0.0 reimplements scrape as a Claude Code agent (`.claude/agents/scrape-extract.md`):
+
+- **Tool surface**: `WebFetch` for page HTML, `Read` / `Write` for IO. No `Bash`, no API call.
+- **Model**: declared `haiku` in frontmatter; runs against the user's Claude.ai subscription quota the same way other agents do.
+- **Pipeline integration**: `fetch-and-diff.py` no longer fetches scrape companies. It writes them to `/tmp/needs_scraping.json` and emits a `scrape_pending` count in its output. The `search-roles` agent dispatches `scrape-extract` per company in parallel (Agent tool batched-call form), and `scripts/diff-scrape.py` (NEW) computes the new/removed delta against state for each result.
+- **Standalone use**: NEW skill `.claude/skills/scrape-page/SKILL.md` wraps `scrape-extract` for ad-hoc extraction-quality testing. User pastes a URL → skill invokes the agent → prints the extracted job array. Useful before committing to track a company on a custom careers page.
+
+User-facing impact:
+
+- **No more `ANTHROPIC_API_KEY` requirement** anywhere in the plugin. Users on Pro/Max subscriptions get scrape extraction "for free" (against quota). Users on direct API-key auth pay the same per-token rate but through their existing Claude Code billing.
+- **No more `api.anthropic.com` in the Routine allowlist.** Removed from INSTALL.md `§3.2b` and ARCHITECTURE.md `§11`.
+- The user-facing flow in `extend-companies` is unchanged — the "scrape vs skip" choice still appears for unsupported ATSes; just the underlying execution path is different.
+
+### Bundled forward from v3.4.0 (committed locally, never publicly released)
+
+The internal v3.4.0 work (doc-accuracy + bug fixes from the public-release-prep audit) is included verbatim:
+
+- README/INSTALL/ARCHITECTURE corrected from v2.4.0 framing
+- Pipeline table corrected from 5 to 6 passes
+- ATS list corrected (Teamtailor, Homerun, scrape were missing)
+- Test count corrected (claimed 150, actual 172)
+- `pack_properties()` ISO-date heuristic
+- `validate-favorites.py` probe rate cap (`MAX_VARIANT_ATTEMPTS = 12`)
+- Token-usage display defensiveness (removed garbled "(usage d.0.5)" output)
+- Hot-digest empty-run skip (no more 52 empty digests/year)
+- Cost framing in 3 places
+- `validate-favorites.py` consolidated to import `ats_from_url` from `ats_adapters.py`
+- Orphan `validate-favorites` skill deleted (unused since v3.x)
+- `run-job-search/SKILL.md` "First-time setup" collapsed (~50 lines of duplicated INSTALL.md content → pointer)
+
+### NOT in v1.0.0 (filed as backlog)
+
+- **Multi-source backend (GSheets, etc.)**: `connectors.json` is structured to accept `"connector_type": "gsheets"` etc. Notion is the only currently-implemented destination. v4+ candidate when there's clear demand for non-Notion users (e.g. biz users on Google Workspace).
+- **Aggregator search direction (Otta, etc.)**: filed earlier as v4 backlog. Not in v1.0.0 scope.
+- **Setup wizard split**: 891 lines is a lot. Risky to restructure an interactive flow; deferred until a wizard end-to-end test harness exists.
+
+### Versions
+
+- **First public release: v1.0.0.** Built on internal iteration v2.3.0 → v3.3.0 (those tags remain in the repo as historical context). Going forward, only v1.x.x tags.
+- Skills: `setup`, `run-job-search`, `extend-companies` (renamed from manage-favorites), `feedback-recycle`, `recalibrate-scoring`, **`scrape-page` (NEW)**
+- Agents: `search-roles`, `validate-urls`, `compile-write`, `notify-hot`, **`scrape-extract` (NEW)**
+- Tests: 172 (unchanged — no functional changes to filter/dispatch logic; refactor was structural)
+
+---
+
+## [3.4.0] — 2026-05-04
+
+**First public release.** Comprehensive doc-accuracy + code-quality pass on top of v3.3.0; no breaking changes for existing users. Bundles ~12 internal release iterations (v2.3.0 → v3.3.0) into a public-ready release-candidate.
+
+### Documentation accuracy
+
+The v2.x → v3.x trail of releases left the user-facing docs out of date. This release reconciles them:
+
+- **README.md** — bumped from v2.4.0 framing to v3.4.0; pipeline table corrected from 5 to 6 passes (Pass 6 = `feedback-recycle` auto-trigger added in v3.0.5); ATS list expanded to 7 (added Teamtailor, Homerun, scrape from v3.1.1 / v3.2.0); scoring narrative reframed for CV-grounded categorical (v3.0.0 default) instead of structured rubric (legacy); test count corrected (claimed 150, actual 172); added a "What's new in v3.x" capsule for the public landing.
+- **INSTALL.md** — Routine allowed-domains list expanded with `api.anthropic.com` (required for v3 LLM scoring + scrape ATS — was silently missing, would cause Routine fires to hard-fail), `*.teamtailor.com`, `*.homerun.co`. Added a domain table explaining what each host is used for. Maintenance section updated to surface the `manage-favorites` skill (v3.3.0) and the auto-triggered `feedback-recycle` (v3.0.0+) instead of pointing users at JSON editing.
+- **ARCHITECTURE.md** — systematic refresh: skills list updated (`setup, run-job-search, manage-favorites, feedback-recycle, recalibrate-scoring`); pipeline section rewritten for 6 passes; new §7.6 documents the v3.0 feedback-recycle learning loop (Match Quality / Feedback Comment / Recycled tracker columns); §10.3 ATS list updated to 7 adapters; new §10.7 documents the `ats_adapters.py` registry pattern (v3.1.0); cost framing added (~$20–50/run Opus, ~$5–15 Sonnet, ~$1–2 Haiku); test count + plugin-manifest transition + scrape-SPA limitation noted. Net +413 words across the file.
+
+### Latent bug fixes
+
+- **`pack_properties()` ISO-date heuristic** (`scripts/notion-api.py`). Plain ISO date strings (`"2026-05-04"`) and datetimes (`"2026-05-04T08:00:00Z"`) passed to `pack_properties()` were silently packed as `rich_text`, causing Notion to reject the property update with "expected to be date". Callers had to use the `date:Name:start` prefix syntax. Now: a regex heuristic auto-detects ISO 8601 strings and packs them as `{date: {start: ...}}`. The prefix syntax still works for users who want explicit control over `start`/`end`/`is_datetime`.
+- **`fetch_scrape()` retry on transient errors** (`scripts/fetch-and-diff.py`). Previously, a single 429/5xx response or timeout from `api.anthropic.com` would fail the entire favorite for the run. Now: one retry on `[429, 500, 502, 503, 504]` and on timeout/connection errors. Permanent errors (400-class) still fail fast.
+- **`validate-favorites.py` probe rate cap** (`scripts/validate-favorites.py`). The slug-variant fallback could trigger up to 33 sequential HTTP probes per failed entry with no rate limit. Capped at 12 attempts via new `MAX_VARIANT_ATTEMPTS` constant; gives up cleanly with a `gave up after N variants` error message instead of silently hanging on bad URLs.
+- **Token-usage display defensiveness** (`.claude/skills/run-job-search/SKILL.md`). The "(usage data unavailable — agent pre-v3.0.5)" inline note could surface as garbled output ("(usage d.0.5)") on no-LLM-call runs. Removed the version-stamp from the section header (now just "Token usage"); orchestrator now omits the row entirely for missing-usage passes, or prints a single "Token usage: no LLM calls this run" line when ALL passes had no activity.
+
+### Code quality
+
+- **`scripts/validate-favorites.py` consolidated** to import `ats_from_url` from `ats_adapters.py` (the v3.1.0 single-source-of-truth registry) instead of duplicating the URL→ATS regex patterns locally. Eliminates a class of drift bug where adding an ATS to the registry wouldn't update validate-favorites' detection set. Bonus: dropped the local `re` import (unused after consolidation) and the parallel `ATS_URL_PATTERNS` table.
+- **Orphan skill deleted**: `.claude/skills/validate-favorites/SKILL.md` (v1.0.0, last touched in early v2.x; never invoked from `run-job-search` or `manage-favorites`; referenced a nonexistent `chrome` ATS). The Python script `scripts/validate-favorites.py` stays as a slug-variant probing fallback used by the setup wizard's Step 7 favorites collection.
+- **`run-job-search/SKILL.md` collapsed** the "First-time setup" section that duplicated INSTALL.md content. Replaced ~50 lines of stale Routine-config instructions (with `--plugin-dir` syntax abandoned in v2.4.0 and an outdated allowed-domains list) with a one-paragraph pointer to INSTALL.md §3. Kept the State DB requirement note and the orchestrator's runtime contract (Routine prompt template).
+- **Hot-digest empty-run skip** (`.claude/agents/notify-hot.md`). Pre-v3.4.0 behavior was to create a dated digest page on every run, even when zero hot matches surfaced. Over 52 weekly runs that junked users' Notion sidebars with empty digests. Now: if `hot_matches == 0` AND no static notifications AND no external companies to surface, skip page creation; orchestrator logs "no hot matches this run" inline.
+- **Cost framing added** in three places — README "Status" section, INSTALL maintenance section, and `setup/SKILL.md` Step 4 — surfacing that the default Opus 4.7 + extended-thinking scoring path costs ~$20–50/run, with the one-line `profile.scoring.model: "claude-sonnet-4-6"` override path cutting that to ~$5–15/run. Default unchanged (Opus delivers the quality the design assumes); just made the trade-off visible upfront so new users aren't surprised by their first invoice.
+
+### What's NOT in v3.4.0
+
+Filed but deferred to keep this release scope narrow:
+
+- **Setup wizard split** (891 lines is a lot; could split into sub-procedures). Risky to restructure an interactive flow without integration testing of every branch — deferred until we have a wizard end-to-end test harness.
+- **Aggregator search direction (post-v1.0 backlog)** — leveraging Otta / Y Combinator Work-at-a-Startup / etc. as adapters in the `ats_adapters` registry. Memory-noted; not built. Trigger to revisit: if users routinely add favorites because they discovered the company elsewhere.
+- **`recalibrate-scoring` ↔ `feedback-recycle` consolidation** — both mutate the profile/prompt based on tracker labels (one manual, one auto). Mental-model friction is real; needs a real design pass, not a cleanup edit.
+- **Hardcoded `MAX_RESPONSE_BYTES = 20MB`** — fine in practice; would need a streaming parser for proper fix, not worth it at current usage scale.
+- **`pack_properties()` finalised-date `is_datetime` flag** — stored at `expanded_dates[name]["_is_datetime"]` but never consulted when building the final `date_obj`. Notion accepts the right format string regardless (datetime ISO strings get parsed as datetime; date-only as date), so the unused flag is dead weight. Could be removed in a future cleanup; not load-bearing.
+
+### Versions
+
+- Plugin: 3.3.0 → **3.4.0** (minor bump — public-release prep, no breaking changes)
+- Skills: `setup`, `run-job-search` (3.4.0), `manage-favorites` (3.3.0), `feedback-recycle` (3.0.0), `recalibrate-scoring` (2.5.2). Removed: `validate-favorites` (orphan)
+- Agents: `search-roles`, `validate-urls`, `compile-write` (3.0.2), `notify-hot` (3.4.0 — empty-skip)
+- Tests: 172 (unchanged — no functional changes to filter/dispatch logic; doc + cleanup only)
 
 ---
 

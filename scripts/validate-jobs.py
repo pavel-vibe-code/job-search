@@ -53,29 +53,22 @@ supported_ats_for_validate = ats_adapters.supported_ats_for_validate
 active_ids_for           = ats_adapters.active_ids_for
 
 
-def load_companies_index(companies_file: str, favorites_file: str) -> Dict[str, dict]:
+def load_companies_index(companies_file: str, custom_companies_file: str) -> Dict[str, dict]:
     """Map company name (lowercased) → company config dict (with ats, slug, etc.).
 
-    Precedence: companies.json wins on duplicate names — consistent with
-    fetch-and-diff.py. Pre-v2.5.0 this script had favorites overriding
-    companies (last-writer-wins by load order), creating a rare-but-real bug
-    where a job that fetched fine via companies.json's `ats: greenhouse` would
-    get marked uncertain in validate via favorites.json's `ats: skip` for the
-    same company.
+    Precedence: AI 50 baseline (companies.json) wins on duplicate names —
+    consistent with fetch-and-diff.py. The custom-companies file extends the
+    baseline; if a user adds a company already in the baseline, the baseline's
+    config wins (the user's entry is silently ignored).
 
-    Pre-v3.0.6 this function read paths hardcoded as `plugin_root/config/...`
-    — fine in local mode, but in cloud mode the user's actual favorites live
-    in Notion (hydrated to /tmp/favorites.json by orchestrator's P-4) while
-    plugin_root/config/favorites.json stays as the shipped template. Pass 1
-    used the hydrated data via fetch-and-diff's --favorites-file arg; Pass 2
-    silently used the template, so user's actual favorites (Parloa, Nebius,
-    JetBrains, Make, etc.) wouldn't be found and got marked
-    `company_name_not_in_index`. v3.0.6 makes the file paths explicit args
-    that the orchestrator passes per deployment mode.
+    Historical context: pre-v4.0.0 this file was named `favorites.json` and
+    the CLI flag was `--favorites-file`. Renamed in v4.0.0 to better reflect
+    the conceptual role (extending the AI 50 baseline). The legacy filename
+    is still accepted as a fallback for in-place upgrades.
     """
     idx: Dict[str, dict] = {}
-    # Load favorites first, companies second — companies wins on duplicate.
-    for path in (favorites_file, companies_file):
+    # Load custom companies first, baseline second — baseline wins on duplicate.
+    for path in (custom_companies_file, companies_file):
         if not path or not os.path.exists(path):
             continue
         with open(path) as f:
@@ -103,21 +96,28 @@ def slug_for(candidate: dict, companies: Dict[str, dict]) -> Optional[Tuple[str,
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--candidates", required=True, help="Path to candidates JSON array")
-    p.add_argument("--plugin-root", required=True, help="Plugin root (used for default companies/favorites file paths if explicit args not given)")
+    p.add_argument("--plugin-root", required=True, help="Plugin root (used for default companies/custom-companies file paths if explicit args not given)")
     p.add_argument("--companies-file", default=None,
-                   help="companies.json path. Default: <plugin-root>/config/companies.json. "
+                   help="companies.json path (the AI 50 baseline). Default: <plugin-root>/config/companies.json. "
                         "In cloud mode the orchestrator should pass /tmp/companies.json (Notion-hydrated).")
-    p.add_argument("--favorites-file", default=None,
-                   help="favorites.json path. Default: <plugin-root>/config/favorites.json. "
-                        "In cloud mode the orchestrator should pass /tmp/favorites.json (Notion-hydrated). "
-                        "Pre-v3.0.6 this defaulted hardcoded to plugin-root, causing user-added favorites "
-                        "in Notion to be invisible to Pass 2 (silently marking them company_name_not_in_index).")
+    p.add_argument("--custom-companies-file", "--favorites-file", default=None,
+                   dest="custom_companies_file",
+                   help="custom-companies.json path (additional companies on top of "
+                        "AI 50 baseline). Default: <plugin-root>/config/custom-companies.json. "
+                        "In cloud mode the orchestrator should pass /tmp/custom-companies.json "
+                        "(Notion-hydrated). The legacy --favorites-file flag is accepted as an "
+                        "alias for backward compat with pre-v4.0.0 orchestrators.")
     p.add_argument("--output", default="/tmp/validate-output.json", help="Where to write validation results")
     p.add_argument("--max-workers", type=int, default=10)
     args = p.parse_args()
 
     companies_file = args.companies_file or os.path.join(args.plugin_root, "config", "companies.json")
-    favorites_file = args.favorites_file or os.path.join(args.plugin_root, "config", "favorites.json")
+    custom_companies_file = args.custom_companies_file or os.path.join(args.plugin_root, "config", "custom-companies.json")
+    # Legacy fallback: pre-v4.0.0 file was config/favorites.json
+    if not os.path.exists(custom_companies_file):
+        _legacy = os.path.join(args.plugin_root, "config", "favorites.json")
+        if os.path.exists(_legacy):
+            custom_companies_file = _legacy
 
     with open(args.candidates) as f:
         candidates = json.load(f)
@@ -133,7 +133,7 @@ def main():
         print(json.dumps(out))
         return
 
-    companies = load_companies_index(companies_file, favorites_file)
+    companies = load_companies_index(companies_file, custom_companies_file)
 
     # Group candidates by (ats, slug). One API call per group fetches the full
     # active-id set, against which we test every candidate in that group.

@@ -17,16 +17,16 @@ description: >
 
 model: haiku
 color: blue
-tools: ["Bash", "Read"]
+tools: ["Bash", "Read", "Agent"]
 ---
 
-You are the fetch-and-diff agent. Your job is to run the ATS fetcher script, apply profile filters to the new jobs, and return the delta for the rest of the pipeline.
+You are the fetch-and-diff agent. Your job is to run the ATS fetcher script, dispatch the scrape-extract agent for any companies tagged `ats: scrape`, apply profile filters to the merged new-jobs list, and return the delta for the rest of the pipeline.
 
-Using `haiku` model — this agent does minimal reasoning; most work is done by the Python script.
+Using `haiku` model — this agent does minimal reasoning; most work is done by the Python script and (for scrape-tracked companies) by sub-agents.
 
-## Step 1 — Run the fetcher
+## Step 1a — Run the deterministic fetcher
 
-Execute the fetch-and-diff script **exactly once**, using the flags the orchestrator passed in the prompt (typically `--state-file /tmp/ai50-state.json`, plus `--profile-file` / `--favorites-file` in cloud mode):
+Execute the fetch-and-diff script **exactly once**, using the flags the orchestrator passed in the prompt (typically `--state-file /tmp/ai50-state.json`, plus `--profile-file` / `--custom-companies-file` in cloud mode):
 
 ```bash
 python3 ./scripts/fetch-and-diff.py --plugin-root . --state-file <orchestrator-supplied-path>
@@ -39,6 +39,62 @@ Capture the JSON output to a file (e.g. `/tmp/fetch-and-diff-output.json`). If t
 > ⚠️ **The script is destructively stateful.** It writes the updated state back to `--state-file` on completion. **Do NOT re-run it to "verify" or "double-check" the output.** A second run with the now-populated state will report `new_jobs: 0` (because the diff is empty), which looks like a bug but is actually expected behavior. If the first run's output looks surprising (e.g. very high or very low `new_jobs`), report it to the orchestrator — do not retry.
 
 > ⚠️ **`stats.new_jobs` from the script is the unfiltered diff count, not the candidate count.** On a first run with empty state, expect this to be in the thousands. Step 3 below filters this list down to `candidates`. Don't confuse the two when summarising results — say "5,045 new jobs from the diff → N candidates after profile filter," not "5,045 new jobs after profile filter."
+
+## Step 1b — Dispatch scrape-extract for scrape-tracked companies (v1.0.0+)
+
+Inspect the fetcher's output JSON at `scrape_pending`:
+
+```json
+{
+  "scrape_pending": {
+    "count":     2,
+    "companies": ["Adfin", "Anthropic"],
+    "needs_scraping_file": "/tmp/needs_scraping.json"
+  }
+}
+```
+
+If `scrape_pending.count == 0`: skip this step entirely.
+
+Otherwise:
+
+1. **Read** `/tmp/needs_scraping.json` to get the per-company list. Each entry has `{name, careers_url, scrape_model, company_key, source}`.
+
+2. **Dispatch the `scrape-extract` agent in parallel** — one invocation per scrape-tracked company. Use a single tool-use block with N agent calls so they execute concurrently. Pass each agent:
+   - Company name
+   - Careers URL
+   - Output file path: `/tmp/scrape-extract-<company-key>.json`
+   - Override model if `scrape_model` is set (e.g. `claude-sonnet-4-6` for tricky pages)
+
+   The scrape-extract agent (`.claude/agents/scrape-extract.md`) handles WebFetch + structured extraction; it does NOT do diff. It returns a job array envelope.
+
+3. **For each scrape-extract result, run `diff-scrape.py`** to compute the new/removed delta against state and update the state file:
+
+   ```bash
+   python3 ./scripts/diff-scrape.py \
+     --extracted /tmp/scrape-extract-<company-key>.json \
+     --state /tmp/ai50-state.json \
+     --company-key scrape:<slug> \
+     --company-name "<name>"
+   ```
+
+   Each invocation prints a JSON envelope `{new_jobs, removed_jobs, summary}`. Parse them.
+
+4. **Merge into the run-wide totals.** Concatenate all scrape `new_jobs` into the deterministic-fetcher's `new_jobs` array. Same for `removed_jobs`. Add to `stats.new_jobs` and `stats.removed_jobs` totals.
+
+5. **Record extraction-quality issues.** If any scrape-extract returned `extraction_quality: "no_static_content"` or returned an `error` envelope, add to `fetch_errors`:
+
+   ```json
+   {"company": "<name>", "error": "scrape_no_static_content", "detail": "page is JavaScript-only; consider marking ats: skip"}
+   ```
+
+   The orchestrator surfaces these in the run summary so the user can re-evaluate the company's tracking strategy.
+
+6. **Pass merged candidates to Step 2** as if they came from the deterministic fetcher.
+
+### Cost notes (v1.0.0+)
+
+scrape-extract runs against your Claude.ai subscription quota (Haiku model). Per careers page: ~12–50K input tokens, ~200–500 output tokens. For 5–10 scrape-tracked companies per run, total scrape token use is small relative to Pass 3 (compile-write) which spends most of the run's tokens on scoring.
 
 ## Step 2 — Read the profile filters
 

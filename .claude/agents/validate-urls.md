@@ -64,7 +64,7 @@ The script is fast (one API call per company, typically 5–15 unique companies 
 ## Failure modes the script handles
 
 - **API down / rate-limited / network error:** all candidates from that company become `uncertain` with `reason = "api_<http_code>"`. Do NOT pass them to compile-write — the orchestrator surfaces them in the run summary for manual review.
-- **Company not in `companies.json` or `favorites.json`:** candidate becomes `uncertain` with `reason = "no_api_for_ats_or_company_unknown"`. This shouldn't happen in normal pipeline flow (search-roles only emits candidates for known companies), but it's defended-against.
+- **Company not in `companies.json` or `custom-companies.json`:** candidate becomes `uncertain` with `reason = "no_api_for_ats_or_company_unknown"`. This shouldn't happen in normal pipeline flow (search-roles only emits candidates for known companies), but it's defended-against.
 - **`ats = html_static` / `static_roles` / `external`:** no API; candidate becomes `uncertain`. The orchestrator typically excludes these earlier, but if any leak through they're flagged here.
 
 ## Output

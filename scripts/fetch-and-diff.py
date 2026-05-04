@@ -61,8 +61,12 @@ def _parse_args() -> argparse.Namespace:
                    help="profile.json path. Default: <plugin-root>/config/profile.json. "
                         "Override when the orchestrator hydrates profile from a non-default location "
                         "(e.g. /tmp/profile.json built from a Notion page in cloud mode).")
-    p.add_argument("--favorites-file", metavar="PATH", default=None,
-                   help="favorites.json path. Default: <plugin-root>/config/favorites.json.")
+    p.add_argument("--custom-companies-file", "--favorites-file", metavar="PATH", default=None,
+                   dest="custom_companies_file",
+                   help="custom-companies.json path (additional companies on top of "
+                        "AI 50 baseline). Default: <plugin-root>/config/custom-companies.json. "
+                        "The legacy --favorites-file flag is accepted as an alias for "
+                        "backward compat with pre-v4.0.0 orchestrators.")
     p.add_argument("--companies-file", metavar="PATH", default=None,
                    help="companies.json path. Default: <plugin-root>/config/companies.json.")
     p.add_argument("--description-limit", metavar="N", type=int, default=600,
@@ -83,7 +87,13 @@ _ARGS = _parse_args()
 PLUGIN_ROOT = _ARGS.plugin_root
 
 COMPANIES_FILE = _ARGS.companies_file or os.path.join(PLUGIN_ROOT, "config", "companies.json")
-FAVORITES_FILE = _ARGS.favorites_file or os.path.join(PLUGIN_ROOT, "config", "favorites.json")
+CUSTOM_COMPANIES_FILE = _ARGS.custom_companies_file or os.path.join(PLUGIN_ROOT, "config", "custom-companies.json")
+# Legacy fallback: if custom-companies.json doesn't exist but the pre-v4.0.0
+# favorites.json does, use that. Lets users upgrade in place without forced migration.
+if not os.path.exists(CUSTOM_COMPANIES_FILE):
+    _legacy = os.path.join(PLUGIN_ROOT, "config", "favorites.json")
+    if os.path.exists(_legacy):
+        CUSTOM_COMPANIES_FILE = _legacy
 PROFILE_FILE   = _ARGS.profile_file   or os.path.join(PLUGIN_ROOT, "config", "profile.json")
 STATE_FILE     = _ARGS.state_file     or os.path.join(PLUGIN_ROOT, "state", "companies.json")
 
@@ -440,94 +450,20 @@ def fetch_homerun(company: dict) -> Tuple[list, Optional[str]]:
         return [], f"parse_error:{e}"
 
 
-# ── Scrape (v3.2.0) — LLM-extracted careers-page fallback ───────────────────
-ANTHROPIC_API_URL    = "https://api.anthropic.com/v1/messages"
-ANTHROPIC_VERSION    = "2023-06-01"
-SCRAPE_MODEL_DEFAULT = "claude-haiku-4-5-20251001"  # cheap; structured extraction doesn't need Opus
-SCRAPE_HTML_LIMIT    = 200_000  # ~50K tokens of input
-SCRAPE_MAX_TOKENS    = 4000
+# ── Scrape (v4.0.0) — Claude Code agent fallback ───────────────────────────
+# Pre-v4.0.0 this section called api.anthropic.com directly via urllib with
+# x-api-key auth (ANTHROPIC_API_KEY env var). v4.0.0 reimplemented scrape as
+# a Claude Code agent (.claude/agents/scrape-extract.md) so users don't need
+# an Anthropic API key — the work runs against their Claude.ai subscription
+# quota the same way other agents (compile-write, notify-hot, etc.) do.
+#
+# Mechanically: fetch-and-diff no longer fetches scrape companies at all. It
+# emits a needs_scraping.json file listing them; the search-roles agent then
+# dispatches scrape-extract per company (in parallel via the Agent tool's
+# batched-call form) and uses scripts/diff-scrape.py to compute the new/
+# removed delta against state. See agents/search-roles.md for the orchestration.
 
-
-def fetch_scrape(company: dict) -> Tuple[list, Optional[str]]:
-    """Fallback fetcher for companies whose ATS isn't in the supported set.
-
-    Per-favorite opt-in: user adds `{name, ats: "scrape", careers_url: "<url>"}`
-    to favorites. fetcher pulls the careers page HTML, calls Claude API with a
-    structured-extraction prompt, returns array of `{id, title, url, location,
-    department}` job dicts.
-
-    Validation: scrape candidates can't be confirmed via API. They land in the
-    tracker as `Status: Uncertain` (per v2.5.2 envelope) for user spot-check.
-
-    Cost: typical careers page is 50-200K chars HTML → 12-50K input tokens.
-    With Haiku ~$0.01-0.04 per page; for 5-10 scrape favorites per fire,
-    ~$0.05-$0.40 marginal cost on top of the v3 LLM scoring run.
-
-    Requires `ANTHROPIC_API_KEY` env var (already required by v3 LLM scoring).
-    """
-    careers_url = company.get("careers_url")
-    if not careers_url:
-        return [], "missing_careers_url"
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        return [], "missing_anthropic_api_key"
-
-    page, err = http_get(careers_url, accept="text/html")
-    if err:
-        return [], f"page_{err}"
-    html = page.decode("utf-8", errors="replace")[:SCRAPE_HTML_LIMIT]
-
-    prompt = (
-        f"Extract job listings from this careers page HTML. "
-        f"Company: {company.get('name', '')}. Page URL: {careers_url}.\n\n"
-        f"Return a JSON array. Each entry: "
-        f"{{\"id\": <stable identifier — job slug or URL fragment>, "
-        f"\"title\": <job title>, "
-        f"\"url\": <full URL to the JD; resolve relatives against page URL>, "
-        f"\"location\": <location string as written>, "
-        f"\"department\": <team/department if visible, else \"\">}}.\n\n"
-        f"Return JSON array only — no prose, no markdown fence. If no jobs found, return [].\n\n"
-        f"HTML:\n{html}"
-    )
-
-    body = json.dumps({
-        "model": company.get("scrape_model", SCRAPE_MODEL_DEFAULT),
-        "max_tokens": SCRAPE_MAX_TOKENS,
-        "messages": [{"role": "user", "content": prompt}],
-    }).encode("utf-8")
-
-    req = urllib.request.Request(
-        ANTHROPIC_API_URL,
-        data=body,
-        headers={
-            "x-api-key": api_key,
-            "anthropic-version": ANTHROPIC_VERSION,
-            "content-type": "application/json",
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            response = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        return [], f"llm_http_{e.code}"
-    except Exception as e:
-        return [], f"llm_error:{e}"
-
-    try:
-        # Anthropic API response: {content: [{type: "text", text: "..."}], ...}
-        content_blocks = response.get("content", [])
-        text = "".join(b.get("text", "") for b in content_blocks if b.get("type") == "text").strip()
-        # Strip markdown fences if the LLM accidentally added them
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1] if "\n" in text else text
-            if text.endswith("```"):
-                text = text.rsplit("```", 1)[0]
-        jobs = json.loads(text)
-        if not isinstance(jobs, list):
-            return [], "llm_unexpected_shape"
-        return jobs, None
-    except Exception as e:
-        return [], f"llm_parse:{e}"
+NEEDS_SCRAPING_FILE = "/tmp/needs_scraping.json"
 
 
 COMEET_TOKEN_RE  = re.compile(r'"token"\s*:\s*"([^"]+)"')
@@ -829,28 +765,6 @@ def normalise_homerun(job: dict, company: dict) -> dict:
     }
 
 
-def normalise_scrape(job: dict, company: dict) -> dict:
-    """Pass-through normaliser for LLM-extracted entries (the prompt already
-    asks for canonical-shape fields). Defaults fill in anything missing."""
-    location = str(job.get("location") or "")
-    return {
-        "id":             str(job.get("id", "")),
-        "company":        company["name"],
-        "title":          job.get("title", ""),
-        "url":            job.get("url", ""),
-        "location":       location,
-        "is_remote":      "remote" in location.lower(),
-        "workplace_type": "Remote" if "remote" in location.lower() else "",
-        "department":     job.get("department", "") or "",
-        "published_at":   "",
-        "source":         company.get("source", "unknown"),
-        "ats":            "scrape",
-        "description":    "",  # No JD body fetch in v3.2.0; the orchestrator's compile-write
-                                # can re-fetch the JD URL if it needs more context for scoring.
-        "extraction":     "llm",  # marker so downstream knows this came from scrape, not API
-    }
-
-
 FETCHER_DISPATCH = {
     "ashby":        (fetch_ashby,        normalise_ashby),
     "greenhouse":   (fetch_greenhouse,   normalise_greenhouse),
@@ -858,7 +772,10 @@ FETCHER_DISPATCH = {
     "lever":        (fetch_lever,        normalise_lever),         # v3.1.1
     "teamtailor":   (fetch_teamtailor,   normalise_teamtailor),    # v3.1.1
     "homerun":      (fetch_homerun,      normalise_homerun),       # v3.1.1
-    "scrape":       (fetch_scrape,       normalise_scrape),        # v3.2.0
+    # "scrape" intentionally absent (v4.0.0): scrape companies are handled
+    # by the search-roles agent dispatching the scrape-extract Claude Code
+    # agent, then diffing via scripts/diff-scrape.py. They land in the
+    # `scrape_pending` output bucket below, not in `fetchable`.
     "html_static":  (fetch_html_static,  normalise_html_static),
     "static_roles": (fetch_static_roles, normalise_static_role),
 }
@@ -937,36 +854,56 @@ def main():
         companies_cfg = json.load(f)
     companies = list(companies_cfg["companies"])
 
-    if os.path.exists(FAVORITES_FILE):
-        with open(FAVORITES_FILE) as f:
-            favorites = json.load(f)
+    if os.path.exists(CUSTOM_COMPANIES_FILE):
+        with open(CUSTOM_COMPANIES_FILE) as f:
+            custom_companies = json.load(f)
         existing_names = {c["name"] for c in companies}
-        for fav in favorites:
-            if isinstance(fav, dict) and fav.get("name") not in existing_names and fav.get("ats"):
-                companies.append(fav)
+        for entry in custom_companies:
+            if isinstance(entry, dict) and entry.get("name") not in existing_names and entry.get("ats"):
+                companies.append(entry)
 
     state = load_state()
     profile_hash = profile_role_hash()
     notif_state = state.get("_meta", {}).get("notifications", {})
 
-    fetchable     = [c for c in companies if c.get("ats") in FETCHER_DISPATCH]
-    external      = [c for c in companies if c.get("ats") == "external"]
-    skipped       = [c for c in companies if c.get("ats") in ("skip", "chrome", "none")]
+    fetchable      = [c for c in companies if c.get("ats") in FETCHER_DISPATCH]
+    scrape_pending = [c for c in companies if c.get("ats") == "scrape"]
+    external       = [c for c in companies if c.get("ats") == "external"]
+    skipped        = [c for c in companies if c.get("ats") in ("skip", "chrome", "none")]
+
+    # Emit scrape_pending list for the search-roles agent to pick up. It will
+    # dispatch scrape-extract per entry (parallel via Agent tool batches), then
+    # diff each result against state via scripts/diff-scrape.py.
+    if scrape_pending:
+        scrape_payload = [
+            {
+                "name":          c.get("name", ""),
+                "careers_url":   c.get("careers_url", ""),
+                "scrape_model":  c.get("scrape_model"),  # Optional per-company override
+                "company_key":   f"scrape:{(c.get('slug') or c.get('name', '')).lower().replace(' ', '_')}",
+                "source":        c.get("source", "unknown"),
+            }
+            for c in scrape_pending
+            if c.get("careers_url")  # entries without careers_url are unfetchable; quietly skip
+        ]
+        with open(NEEDS_SCRAPING_FILE, "w") as f:
+            json.dump(scrape_payload, f, indent=2, ensure_ascii=False)
 
     all_new_jobs: list = []
     all_removed:  list = []
     static_notifications: list = []
     errors: list = []
     stats = {
-        "companies_total":     len(companies),
-        "companies_fetchable": len(fetchable),
-        "companies_external":  len(external),
-        "companies_skipped":   len(skipped),
-        "companies_errored":   0,
-        "total_jobs_fetched":  0,
-        "new_jobs":            0,
-        "removed_jobs":        0,
-        "run_date":            TODAY,
+        "companies_total":      len(companies),
+        "companies_fetchable":  len(fetchable),
+        "companies_scrape_pending": len(scrape_pending),
+        "companies_external":   len(external),
+        "companies_skipped":    len(skipped),
+        "companies_errored":    0,
+        "total_jobs_fetched":   0,
+        "new_jobs":             0,
+        "removed_jobs":         0,
+        "run_date":             TODAY,
     }
 
     new_state = dict(state)
@@ -1033,6 +970,16 @@ def main():
             }
             for c in external
         ],
+        "scrape_pending": {
+            "count":     len(scrape_pending),
+            "companies": [c.get("name", "") for c in scrape_pending],
+            "needs_scraping_file": NEEDS_SCRAPING_FILE if scrape_pending else None,
+            "_note":     "These companies need scrape-extract agent dispatch. The "
+                          "search-roles agent reads needs_scraping.json, invokes the "
+                          "agent per entry, then runs scripts/diff-scrape.py to merge "
+                          "the new/removed delta into all_new_jobs / all_removed and "
+                          "persist the updated state.",
+        },
         "skipped_companies": [
             {"name": c["name"], "ats": c.get("ats"), "reason": c.get("_skip_reason") or c.get("_note", "")}
             for c in skipped

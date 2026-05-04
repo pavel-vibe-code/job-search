@@ -1,18 +1,21 @@
 # AI 50 Job Search
 
-A Claude Code plugin that runs a weekly job search across the [Forbes AI 50](https://www.forbes.com/lists/ai50/) plus companies you flag as favorites, scores results against a personalised rubric, and writes qualifying matches into your Notion workspace. Designed to run unattended as a [Cloud Routine](https://claude.ai/code/routines).
+A Claude Code plugin that runs a weekly job search across the [Forbes AI 50](https://www.forbes.com/lists/ai50/) — and any custom companies you add on top — scores results against your CV + criteria, and writes qualifying matches into your Notion workspace. Designed to run unattended as a [Cloud Routine](https://claude.ai/code/routines).
 
 ```
 Every Monday at 08:00:
   ├─ Fetch all 50+ companies' ATS feeds in parallel
   ├─ Diff against last week's state — only NEW jobs surface
-  ├─ Filter by your role types, languages, location rules
-  ├─ Score against your rubric (criteria + bonuses you defined in setup)
+  ├─ Filter by your role types, languages, hard-exclusion rules
+  ├─ Score against your CV (LLM-judged High / Mid / Low buckets)
   ├─ Write qualifying jobs to your Notion tracker
-  └─ Drop a "🔥 Hot Jobs — <date>" digest in your Notion sidebar
+  ├─ Drop a "🔥 Hot Jobs — <date>" digest in your Notion sidebar
+  └─ Recycle your tracker labels into next week's scoring (weekly)
 ```
 
-You wake up Monday with 0–10 new candidates pre-vetted. No more manually trawling 50 careers pages.
+You wake up Monday with 0–10 new candidates pre-vetted. No more manually trawling 50+ careers pages.
+
+**What v1.0 ships with** (after iteration through internal v2.x → v4.x): CV-grounded LLM-judged categorical scoring (High / Mid / Low buckets, not numeric rubric); 6 deterministic ATS adapters (Ashby, Greenhouse incl. EU subdomain, Lever, Comeet, Teamtailor, Homerun) plus a Claude Code agent–based scrape fallback for any HTML careers page (no API key required); Notion-feedback learning loop that improves scoring week-over-week from your tracker labels; `extend-companies` skill for dialogue-based add/remove/update of custom-tracked companies on top of the AI 50 baseline (no JSON editing); `scrape-page` skill for ad-hoc extraction-quality testing; per-run token + cost tracking against your Claude.ai subscription quota. See [CHANGELOG.md](CHANGELOG.md) for the full development trail.
 
 ---
 
@@ -36,17 +39,18 @@ For Cloud Routine setup (scheduled weekly runs), see [INSTALL.md](INSTALL.md).
 
 ## What it does, in detail
 
-The pipeline has five passes per run:
+The pipeline has six passes per run:
 
 | Pass | Component | What it does |
 |---|---|---|
-| 1 | `search-roles` agent | Fetches each company's ATS API directly (Ashby / Greenhouse / Lever / Comeet); diffs against the State DB so only NEW jobs surface |
+| 1 | `search-roles` agent | Fetches each company's ATS API directly (Ashby / Greenhouse incl. EU / Lever / Comeet / Teamtailor / Homerun); for any company tagged `ats: scrape`, dispatches the `scrape-extract` Claude Code agent (Haiku) to extract jobs from the HTML careers page. Diffs all results against the State DB so only NEW jobs surface. |
 | 2 | `validate-urls` agent | Confirms each candidate listing is still live (drops postings closed since last week) |
-| 3 | `compile-write` agent | Applies your hard exclusions (language, role category, location), scores the survivors against your rubric, writes qualifying rows to your Tracker DB |
+| 3 | `compile-write` agent | Applies typed hard exclusions (language, location, custom rules), scores survivors with LLM-judged High/Mid/Low against your CV + criteria, writes qualifying rows to your Tracker DB |
 | 4 | (orchestrator) | Persists the run's job-ID state to the State DB so next week's diff works |
-| 5 | `notify-hot` agent | Creates a dated digest page with the current run's highest-scoring matches |
+| 5 | `notify-hot` agent | Creates a dated digest page with the current run's High-bucket matches (skips the page if there's nothing hot to report) |
+| 6 | `feedback-recycle` skill | Auto-triggers if 7+ days since last cycle: reads your tracker labels (Match Quality, Feedback Comment), derives anti-patterns + few-shot examples, feeds them into next run's scoring prompt |
 
-Total runtime per fire: 60–90 seconds for 50 companies.
+Total runtime per fire: 60–90 seconds for ~50 companies plus a few seconds per scrape-tracked company. **Cost** runs against your Claude.ai subscription quota (the agents use Claude as their substrate — no Anthropic API key needed). For users who run Claude Code via direct API key auth instead of Claude.ai login, the equivalent pay-per-token cost is roughly **$20–50 per run on Opus default, $5–15 on Sonnet** (override via `profile.scoring.model`).
 
 ---
 
@@ -63,10 +67,10 @@ Total runtime per fire: 60–90 seconds for 50 companies.
 │      └── ...
 ├── 📊 AI50 State (database)             ← per-company job-ID state (diff key)
 ├── 📄 AI 50 Profile                     ← your profile (JSON in body, edit anytime)
-└── 📄 AI 50 Favorites                   ← your favorite companies (JSON in body)
+└── 📄 Extended Companies List           ← companies you track on top of AI 50
 ```
 
-To tune the scoring rubric or change role types, edit the **AI 50 Profile** Notion page directly. Changes apply on the next run.
+To tune scoring criteria or change role types, edit the **AI 50 Profile** Notion page directly (changes apply on next run). To add/remove/update custom companies on top of the AI 50 baseline, run the `extend-companies` skill (dialogue-based, no JSON editing). To preview extraction quality on a careers page before adding it as scrape-tracked, run `scrape-page`.
 
 ---
 
@@ -82,7 +86,7 @@ This plugin owns the scattered-source problem: fetches everything, runs your fil
 
 - **[INSTALL.md](INSTALL.md)** — installation + Cloud Routine setup, two paths (local interactive, cloud scheduled)
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — full technical reference: pipeline, discovery layer, scoring, failure handling, technology choices
-- **[CHANGELOG.md](CHANGELOG.md)** — release notes; v2.4.0 is the current release
+- **[CHANGELOG.md](CHANGELOG.md)** — release notes; v1.0.0 is the first public release (built on internal iteration v2.x → v4.x)
 
 ---
 
@@ -92,38 +96,41 @@ This plugin owns the scattered-source problem: fetches everything, runs your fil
 - **Two auth paths:** Notion MCP (OAuth, plug-and-play, fine for laptop runs) or API token (deterministic, recommended for Cloud Routines where >95% per-run success matters).
 - **Markdown fallback for resilience.** If Notion writes fail mid-run (auth blip, API outage), the orchestrator emits the rows to `outputs/<date>-tracker-fallback.md` so results aren't lost; state is auto-corrected so next run retries.
 - **Notion-only data layer, no external DB.** State, profile, favorites all live in your Notion workspace. No Postgres, no S3, no infra. The user already has Notion; the plugin just uses it.
-- **150 unit tests pin the filter logic.** The tests cover eight common candidate personas (home-region only, open to relocation, multi-region remote, etc.) so future changes can't silently break filtering for one archetype while looking fine for another.
+- **172 unit tests pin the filter and dispatch logic.** The tests cover eight common candidate personas (home-region only, open to relocation, multi-region remote, etc.) plus URL→ATS dispatch coverage, so future changes can't silently break filtering for one archetype or break a connector while looking fine for another.
 
 ---
 
 ## Status
 
-v2.4.0 — distribution-ready. Runs reliably as a weekly Cloud Routine. Tested end-to-end against a fresh Notion workspace.
+v1.0.0 — first public release. Runs reliably as a weekly Cloud Routine. Tested end-to-end against multiple fresh Notion workspaces; built on ~20 pre-public iterations through Apr–May 2026 (preserved as historical tags `v2.3.0` → `v3.3.0` in the git history for development context). The public release cadence starts at v1.0.0; future releases bump v1.x.x.
 
-Known limitations (see ARCHITECTURE.md §14):
+Known limitations:
 - `removed_jobs_pending` (closures the agent didn't reach mid-failure) currently relies on next run's diff to re-surface; rare edge case can lose a closure.
 - Cloud Routine env vars are visible to anyone with edit access on the routine — rotate the Notion token periodically if you share access.
+- `scrape` ATS (Claude Code agent extraction of HTML careers pages) only works on pages that serve meaningful HTML to non-JS clients; pure SPAs return an empty shell and the agent returns `extraction_quality: no_static_content`. Use the `scrape-page` skill to test extraction quality on a careers page before committing to track it.
+- Default scoring uses Claude Opus 4.7 with extended thinking — premium quality. Cost runs against your Claude.ai subscription quota (Pro: meaningful chunk of weekly cap; Max: comfortable headroom). To cut quota use ~75% with a small quality drop, set `profile.scoring.model: "claude-sonnet-4-6"` in your AI 50 Profile page.
 
 ---
 
 ## Requirements
 
-- [Claude Code](https://claude.ai/code) installed (CLI / desktop / web)
+- [Claude Code](https://claude.ai/code) installed (CLI / desktop / web), with a Claude.ai subscription (Pro or Max recommended) OR direct API key auth
 - A Notion account
 - Python 3 (always present on macOS / most Linux)
 
-That's it. No `pip install`, no Postgres, no Redis, no Docker.
+That's it. No `pip install`, no Anthropic API key required (the LLM work runs on Claude as the agent substrate), no Postgres, no Redis, no Docker.
 
 ---
 
 ## Contributing
 
 Issues and PRs welcome. The most useful contributions tend to be:
-- Adding companies to `config/companies.json` (especially when their ATS slug changes)
+- Adding companies to `config/companies.json` (the curated AI 50 baseline shipped with the plugin) — especially when their ATS slug changes. End-users add personal companies via the `extend-companies` skill, not by editing companies.json.
+- Adding ATS adapters to `scripts/ats_adapters.py` (the registry pattern — one new entry per ATS, plus a fetcher in `fetch-and-diff.py` and a normaliser)
 - Adding region keywords to `scripts/fetch-and-diff.py` for personas in regions the current keyword list under-represents
 - Adding persona-scenario tests to `tests/test_personas.py` if you find a candidate archetype the current filter doesn't handle well
 
-For larger architectural changes (new connector type, new ATS provider), open an issue first to discuss.
+For larger architectural changes (new connector type, new auth method), open an issue first to discuss.
 
 ---
 

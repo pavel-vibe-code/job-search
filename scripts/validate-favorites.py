@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """
-validate-favorites.py
+validate-favorites.py — slug-variant probing fallback for the setup wizard.
 
-Tests every entry in favorites.json against its configured ATS JSON API endpoint.
-For entries that return 404, tries common slug variants across all three platforms.
-Outputs a JSON report to stdout.
+Tests every entry in custom-companies.json against its configured ATS JSON API
+endpoint. For entries that return 404, tries common slug variants across the
+three platforms it knows about (ashby / greenhouse / lever). Outputs a JSON
+report to stdout. The filename retains "favorites" for git-history continuity;
+the underlying data store moved to custom-companies.json in v4.0.0.
 
 Usage:
     python3 validate-favorites.py [--plugin-root /path/to/plugin]
 """
 
+import importlib.util
 import json
 import os
-import re
 import sys
 import urllib.request
 import urllib.error
@@ -23,33 +25,29 @@ if "--plugin-root" in sys.argv:
     idx = sys.argv.index("--plugin-root")
     PLUGIN_ROOT = sys.argv[idx + 1]
 
-FAVORITES_FILE = os.path.join(PLUGIN_ROOT, "config", "favorites.json")
+# v4.0.0: file renamed favorites.json → custom-companies.json. Legacy filename
+# accepted as fallback so in-place upgrades from pre-v4.0.0 don't break.
+CUSTOM_COMPANIES_FILE = os.path.join(PLUGIN_ROOT, "config", "custom-companies.json")
+if not os.path.exists(CUSTOM_COMPANIES_FILE):
+    _legacy = os.path.join(PLUGIN_ROOT, "config", "favorites.json")
+    if os.path.exists(_legacy):
+        CUSTOM_COMPANIES_FILE = _legacy
+
+# Load shared ATS registry — single source of truth for URL→ATS detection.
+# Same loader pattern as validate-jobs.py (the dash in script filenames
+# prevents ordinary `import ats_adapters`).
+_ADAPTERS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ats_adapters.py")
+_spec = importlib.util.spec_from_file_location("ats_adapters", _ADAPTERS_PATH)
+_ats_adapters = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_ats_adapters)
+ats_from_url = _ats_adapters.ats_from_url
 
 ASHBY_API      = "https://api.ashbyhq.com/posting-api/job-board/{slug}"
 GREENHOUSE_API = "https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
 LEVER_API      = "https://api.lever.co/v0/postings/{slug}?mode=json"
 
 FETCH_TIMEOUT = 12
-
-# URL-based ATS detection (v2.5.0). When a favorites entry includes a
-# `careers_url` field, parse it to derive (ats, slug) deterministically rather
-# than running through slow slug-variant probing. Mirrors validate-jobs.py.
-ATS_URL_PATTERNS = [
-    (re.compile(r'^https?://(?:jobs|job-boards)\.ashbyhq\.com/([^/]+)'),     'ashby'),
-    (re.compile(r'^https?://(?:boards|job-boards)\.greenhouse\.io/([^/]+)'), 'greenhouse'),
-    (re.compile(r'^https?://jobs\.lever\.co/([^/]+)'),                        'lever'),
-]
-
-
-def ats_from_url(url):
-    """Parse careers_url to derive (ats, slug). Returns None if no match."""
-    if not url:
-        return None
-    for pattern, ats in ATS_URL_PATTERNS:
-        m = pattern.match(url)
-        if m:
-            return ats, m.group(1)
-    return None
+MAX_VARIANT_ATTEMPTS = 12  # cap probe HTTP requests per entry to avoid hangs on bad URLs
 
 
 def build_url(ats: str, slug: str) -> str:
@@ -173,15 +171,20 @@ def validate_entry(entry: dict) -> dict:
             result["error"] = "Endpoint is valid but returned 0 jobs — company may have no open roles, or the slug may be wrong"
         return result
 
-    # Failed — try variants
+    # Failed — try variants (capped at MAX_VARIANT_ATTEMPTS to avoid hangs on bad URLs)
     result["error"] = f"http_{code}" if code else err
     tried = set()
     tried.add((ats, slug))
+    attempts = 0
 
     for try_ats, try_slug in slug_variants(name, slug):
         if (try_ats, try_slug) in tried:
             continue
         tried.add((try_ats, try_slug))
+        attempts += 1
+        if attempts > MAX_VARIANT_ATTEMPTS:
+            result["error"] = f"{result['error']} | gave up after {MAX_VARIANT_ATTEMPTS} variants"
+            break
         try_code, try_count, _ = probe(try_ats, try_slug)
         if try_code == 200:
             result["status"]     = "failed_with_suggestion"
@@ -193,14 +196,18 @@ def validate_entry(entry: dict) -> dict:
 
 
 def main():
-    if not os.path.exists(FAVORITES_FILE):
-        print(json.dumps({"error": f"favorites.json not found at {FAVORITES_FILE}"}))
+    if not os.path.exists(CUSTOM_COMPANIES_FILE):
+        print(json.dumps({"error": f"custom-companies.json not found at {CUSTOM_COMPANIES_FILE} (also tried legacy favorites.json)"}))
         sys.exit(1)
 
-    with open(FAVORITES_FILE) as f:
-        favorites = json.load(f)
+    with open(CUSTOM_COMPANIES_FILE) as f:
+        entries = json.load(f)
 
-    results  = [validate_entry(e) for e in favorites]
+    # Skip leading _meta entry (v2.x convention preserved through v4.0.0).
+    if entries and isinstance(entries[0], dict) and entries[0].get("_meta"):
+        entries = entries[1:]
+
+    results  = [validate_entry(e) for e in entries]
     ok       = [r for r in results if r["status"] == "ok"]
     empty    = [r for r in results if r["status"] == "empty"]
     suggest  = [r for r in results if r["status"] == "failed_with_suggestion"]
@@ -211,7 +218,7 @@ def main():
     output = {
         "results": results,
         "summary": {
-            "total":       len(favorites),
+            "total":       len(entries),
             "ok":          len(ok),
             "empty":       len(empty),
             "suggestion":  len(suggest),

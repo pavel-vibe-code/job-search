@@ -378,7 +378,7 @@ Create a new page per qualifying job. **Schema must match what the wizard create
 | `Status`      | select    | `"New"` for live; `"Uncertain"` for Pass-2-uncertain | `"New"` for live; `"Uncertain"` for Pass-2-uncertain |
 | `URL`         | url       | Direct ATS URL                                      | Direct ATS URL                                   |
 | `Department`  | rich_text | Department string                                   | Department string                                |
-| `Source`      | rich_text | `"ai50"` / `"favorites"`                            | `"ai50"` / `"favorites"`                         |
+| `Source`      | rich_text | `"ai50"` / `"custom"`                                | `"ai50"` / `"custom"`                            |
 | `Date Added`  | date      | Today, ISO 8601                                     | Today, ISO 8601                                  |
 | `Why Fits`    | rich_text | LLM rationale (back-compat — same content as Reasoning) | 2-3 sentence rubric rationale                |
 | `Reasoning`   | rich_text | LLM rationale (1-3 sentences, why this verdict)     | (omit — null in legacy path)                     |

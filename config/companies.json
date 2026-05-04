@@ -1,5 +1,5 @@
 {
-  "_comment": "Forbes AI 50 + companies discovered via favorites. ATS types: ashby, greenhouse, comeet, html_static, static_roles, external, skip.",
+  "_comment": "Forbes AI 50 baseline. Shipped as part of the plugin; users extend this list via config/custom-companies.json (cloud: Notion 'Extended Companies List' page). ATS types: ashby, greenhouse, comeet, lever, teamtailor, homerun, scrape, html_static, static_roles, external, skip.",
   "ashby_api": "https://api.ashbyhq.com/posting-api/job-board/{slug}",
   "greenhouse_api": "https://boards-api.greenhouse.io/v1/boards/{slug}/jobs",
   "companies": [

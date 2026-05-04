@@ -45,6 +45,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import tempfile
 import urllib.error
@@ -59,6 +60,9 @@ NOTION_VERSION   = "2022-06-28"
 RICH_TEXT_LIMIT  = 1900  # safety margin under Notion's 2000-char per-element limit
 HTTP_TIMEOUT     = 30
 DEFAULT_TOKEN_FILE = "~/.config/ai50-job-search/notion-token"
+# ISO 8601 date / datetime — used by pack_properties to auto-pack date strings
+# as Notion date properties. Anchored: must be the entire string.
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$")
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -260,6 +264,13 @@ def pack_properties(props_in: dict) -> dict:
         # URL
         if isinstance(v, str) and v.startswith(("http://", "https://")):
             out[k] = {"url": v}
+            continue
+        # ISO date / datetime heuristic — saves callers from needing the
+        # "date:Name:start" prefix syntax for the common case of just passing
+        # a date string. Matches "2026-05-04" or "2026-05-04T08:00:00..." but
+        # NOT free-form text that happens to start with digits.
+        if isinstance(v, str) and _ISO_DATE_RE.match(v):
+            out[k] = {"date": {"start": v}}
             continue
         # Default: rich_text
         if isinstance(v, str):
@@ -651,12 +662,12 @@ def cmd_hydrate_state(args, token):
 # - policy: "recreate_ok" → orchestrator may rebuild the empty shell
 #           "abort_if_missing" → has user JSON content; never auto-recreate
 DISCOVER_SPEC = {
-    "parent_page":    ("parent_page_id",             "page",     "recreate_ok"),
-    "tracker_db":     ("tracker_database_id",        "database", "recreate_ok"),
-    "hot_list_page":  ("hot_list_parent_page_id",    "page",     "recreate_ok"),
-    "state_db":       ("tracker_state_database_id",  "database", "recreate_ok"),
-    "profile_page":   ("profile_page_id",            "page",     "abort_if_missing"),
-    "favorites_page": ("favorites_page_id",          "page",     "abort_if_missing"),
+    "parent_page":             ("parent_page_id",             "page",     "recreate_ok"),
+    "tracker_db":              ("tracker_database_id",        "database", "recreate_ok"),
+    "hot_list_page":           ("hot_list_parent_page_id",    "page",     "recreate_ok"),
+    "state_db":                ("tracker_state_database_id",  "database", "recreate_ok"),
+    "profile_page":            ("profile_page_id",            "page",     "abort_if_missing"),
+    "extended_companies_page": ("extended_companies_page_id", "page",     "abort_if_missing"),
 }
 
 DISCOVER_KEYS = {k: v[0] for k, v in DISCOVER_SPEC.items()}
@@ -762,7 +773,7 @@ def cmd_discover(args, token):
             "error": "names_missing",
             "missing": missing_names,
             "config": cfg_path,
-            "hint": "Add notion.names.{parent_page,tracker_db,hot_list_page,state_db,profile_page,favorites_page} to connectors.json.",
+            "hint": "Add notion.names.{parent_page,tracker_db,hot_list_page,state_db,profile_page,extended_companies_page} to connectors.json.",
         }), file=sys.stderr)
         sys.exit(3)
 
@@ -869,11 +880,11 @@ def cmd_discover(args, token):
                     db_candidates.setdefault(_norm(_block_title(child, "child_database")), []).append(cid)
 
             for k, candidates in (
-                ("hot_list_page",  page_candidates),
-                ("profile_page",   page_candidates),
-                ("favorites_page", page_candidates),
-                ("tracker_db",     db_candidates),
-                ("state_db",       db_candidates),
+                ("hot_list_page",           page_candidates),
+                ("profile_page",            page_candidates),
+                ("extended_companies_page", page_candidates),
+                ("tracker_db",              db_candidates),
+                ("state_db",                db_candidates),
             ):
                 if result[k]["status"] != "missing":
                     continue
@@ -951,7 +962,7 @@ def cmd_discover(args, token):
         summary["error"] = "user_content_missing"
         summary["hint"] = (
             f"User-content artifacts missing or inaccessible: {blocking_missing}. "
-            "These hold your profile/favorites JSON and are NEVER auto-recreated. "
+            "These hold your profile/extended-companies JSON and are NEVER auto-recreated. "
             "Re-run 'set up the plugin' to recreate from scratch."
         )
 

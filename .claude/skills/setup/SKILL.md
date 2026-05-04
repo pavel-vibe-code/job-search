@@ -57,12 +57,12 @@ Then print:
 ```
 This plugin can run in two modes:
 
-  • Cloud Routine — your profile, favorites, and tracking state all live in
+  • Cloud Routine — your profile, custom companies, and tracking state all live in
     Notion. The plugin repo stays generic and shareable. Pick this if you want
     scheduled cloud runs via Claude Code Routines (claude.ai/code/routines).
     To update your profile later, edit the Notion page directly.
 
-  • Local — your profile and favorites live in this folder's config/*.json
+  • Local — your profile and custom companies live in this folder's config/*.json
     files. State goes either to a local file or to a Notion database.
     Pick this for interactive use on your own machine.
 ```
@@ -72,12 +72,12 @@ Call `AskUserQuestion`:
 - Question: "Which deployment mode?"
 - Header: "Mode"
 - Options:
-  - label: "Cloud Routine", description: "Profile + favorites + state in Notion. Repo stays generic. Best for scheduled runs."
+  - label: "Cloud Routine", description: "Profile + custom companies + state in Notion. Repo stays generic. Best for scheduled runs."
   - label: "Local", description: "Config in this folder. State local or Notion."
 
 Record the choice as `deployment_mode` (cloud / local). This affects:
 - Step 5 — cloud mode auto-creates Profile + Favorites pages in addition to Tracker DB / Hot Lists / State DB; local mode creates only the latter (and state DB is optional).
-- Step 6 — cloud mode writes profile/favorites JSON into the Notion pages instead of into config/*.json.
+- Step 6 — cloud mode writes profile/custom-companies JSON into the Notion pages instead of into config/*.json.
 
 Continue to Step 2.
 
@@ -360,6 +360,8 @@ Store `_proposal_explanation` (the 2-3 sentence reasoning) in `profile.json[scor
 
 **Note for the wizard agent:** the user can always edit `profile.json[scoring]` directly afterward. This step is about a quick, personalised first pass — not about getting it perfect.
 
+**Cost framing (v3 path with CV upload):** scoring uses Claude Opus 4.7 with extended thinking (4000-token budget) by default — the highest-quality model for multi-criteria evaluation. Typical cost: **~$20–50 per Routine fire** (one fire/week → ~$80–200/month). To cut cost ~75% with a small quality drop, set `profile.scoring.model: "claude-sonnet-4-6"` directly in the profile JSON after setup (~$5–15/run). Mention this once at the end of setup so the user has the context; don't make it a wizard question (most users want the Opus default and the override is a one-line edit).
+
 ---
 
 ## Step 5 — Notion connector
@@ -542,7 +544,7 @@ Read the default names from `./config/connectors.json[notion.names]`. Defaults:
 | `hot_list_page` | Hot Lists |
 | `state_db` | AI50 State |
 | `profile_page` | AI 50 Profile |
-| `favorites_page` | AI 50 Favorites |
+| `extended_companies_page` | Extended Companies List |
 
 Print the defaults and ask:
 
@@ -602,7 +604,7 @@ If they pick (c) — **Create artifacts automatically:**
 
 6. **Cloud-mode only — create Profile + Favorites pages.** Skip these in local mode.
    - Create page named `names.profile_page` under the parent. Body: a single ```json code block containing the full profile.json that will be assembled in Step 6 (write the page content during Step 6 once the JSON is built).
-   - Create page named `names.favorites_page` under the parent. Body: a single ```json code block containing the favorites array (default `[]` if user doesn't add any in Step 7).
+   - Create page named `names.extended_companies_page` under the parent. Body: a single ```json code block containing the custom-companies array (default `[]` if user picks "Skip" in Step 7).
    - Both pages will be edited by the user later via Notion directly. The plugin reads them on every run; it never writes back. **They are NEVER auto-recreated by the runtime** — if they're accidentally deleted, the user must re-run setup.
 
 7. Capture all IDs and write them to `./state/cached-ids.json` (Step 6 below). The repo's `connectors.json` does NOT receive these IDs — IDs are per-user, not per-plugin.
@@ -732,7 +734,7 @@ Build `profile.json` from all collected answers:
 }
 ```
 
-**In local mode:** write the assembled `profile.json` to `./config/profile.json`. Leave `config/favorites.json` for Step 7.
+**In local mode:** write the assembled `profile.json` to `./config/profile.json`. Leave `config/custom-companies.json` for Step 7.
 
 **In cloud mode:** do **not** write `config/profile.json`. Instead:
 - Use `notion-update-page` (replace_content) to set the body of the AI 50 Profile page (created in Step 5b) to a single ```json code block containing the assembled profile JSON.
@@ -753,7 +755,7 @@ Build `profile.json` from all collected answers:
 }
 ```
 
-**Write `state/cached-ids.json`** — this is the per-user ID cache. The runtime reads this first; on miss, falls back to discover-by-name; on miss again, recreates safe artifacts (or aborts on profile/favorites).
+**Write `state/cached-ids.json`** — this is the per-user ID cache. The runtime reads this first; on miss, falls back to discover-by-name; on miss again, recreates safe artifacts (or aborts on profile / extended-companies pages).
 
 ```json
 {
@@ -762,7 +764,7 @@ Build `profile.json` from all collected answers:
   "hot_list_parent_page_id":     "<resolved hot lists page>",
   "tracker_state_database_id":   "<resolved state DB | omit if not created>",
   "profile_page_id":             "<cloud mode only: omit in local mode>",
-  "favorites_page_id":           "<cloud mode only: omit in local mode>",
+  "extended_companies_page_id":  "<cloud mode only: omit in local mode>",
   "_resolved_at":                "{today, ISO 8601}",
   "_workspace_id":               "<from notion-api.py users-me, for sanity check>"
 }
@@ -783,50 +785,93 @@ printf '{"setup_completed":"%s","method":"guided","deployment_mode":"%s","auth_m
 
 ---
 
-## Step 7 — Favorites (optional, with careers-URL capture)
+## Step 7 — Custom companies (optional opt-in)
 
 Print:
 
 ```
 ✅ Configuration saved.
 
-Optional: any specific companies to track beyond the AI 50 list?
-(e.g. your target employer, a competitor, a company in your niche)
+The plugin tracks the Forbes AI 50 baseline by default — ~50 leading
+AI companies (Anthropic, OpenAI, Cohere, Mistral, Perplexity, ...).
+For most users, that's the right scope.
 
-For each company, paste the URL of their careers page if you have it
-handy — that lets me detect their ATS deterministically (much faster
-than guessing). If you don't have URLs, I'll detect the ATS by probing
-common platforms.
+You can extend this list with custom companies you want to track on
+top — your target employer, a competitor, an AI-native startup in
+your niche. They run through the same pipeline as AI 50 entries:
+weekly fetch, diff, score, into your tracker.
 
-Format examples:
-  Together AI, https://job-boards.greenhouse.io/togetherai
-  Cohere, https://jobs.lever.co/cohere
-  Anthropic                                    ← name only is fine too
+Want to add custom companies now, or skip and add later?
+  - "now": paste careers URLs (one per line); I'll auto-detect the ATS
+  - "skip": continue with AI 50 baseline only. You can extend anytime
+            by typing "extend companies" — opens an interactive flow.
+```
 
-One company per line. Press Enter on a blank line to finish, or just
-press Enter now to skip.
+Call `AskUserQuestion`:
+- Question: "Add custom companies now?"
+- Options:
+  - label: "Now", description: "I'll paste URLs"
+  - label: "Skip", description: "AI 50 baseline only — I'll extend later if I need to"
+
+### If "Skip"
+
+Print:
+```
+Got it. You'll run with the AI 50 baseline. After your first run, type
+"extend companies" anytime to add custom-tracked companies via the
+extend-companies skill.
+```
+
+In **cloud mode**: create the Extended Companies List Notion page with body `[]` (empty JSON array in a code block). The page exists so the runtime discovery can find it, but it's empty.
+
+In **local mode**: create `./config/custom-companies.json` with `[]`.
+
+Move on to Step 7.5.
+
+### If "Now"
+
+Print:
+
+```
+Paste careers URL(s) for each company you want to track. One per line.
+Press Enter twice when done.
+
+  https://job-boards.greenhouse.io/togetherai   (auto-detects: greenhouse)
+  https://botify.teamtailor.com/jobs/            (auto-detects: teamtailor)
+  https://example.com/careers                    (custom domain → I'll ask)
+  Anthropic                                       (name only — I'll ask for the URL)
 ```
 
 For each entry:
-1. **If careers_url provided:** parse it against known ATS host patterns (introduced v2.5.0):
-   - `(?:jobs|job-boards)\.ashbyhq\.com/<slug>` → `ats: ashby, slug: <slug>`
-   - `(?:boards|job-boards)\.greenhouse\.io/<slug>` → `ats: greenhouse, slug: <slug>`
-   - `jobs\.lever\.co/<slug>` → `ats: lever, slug: <slug>`
-   - `www\.comeet\.com/jobs/<slug>` → `ats: comeet, slug: <slug>`
-   
-   Store the resolved entry as `{name, ats, slug, careers_url, source: "user_added"}`. URL is preserved even if ats was derived deterministically — it's forward-compatible: if a future version adds Workable/Personio support, the URL is already there to re-parse.
-2. **If careers_url not provided:** fall back to ATS auto-detection (the legacy `validate-favorites.py` slug-variant probing). Store as `{name, ats, slug, source: "user_added"}` with no careers_url field.
-3. **If careers_url provided but URL doesn't match any supported ATS** (i.e. not on Ashby / Greenhouse / Lever / Comeet / Teamtailor / Homerun): offer the user **two options**:
-   - **`ats: "scrape"`** (v3.2.0+) — generic LLM-extracted careers-page fallback. Set `{name, ats: "scrape", careers_url}`. Each Routine fire calls Claude (Haiku, ~$0.01-0.04 per page) to parse the careers page and extract structured job entries. Validation isn't supported (no API to confirm liveness), so candidates land in the tracker as `Status: Uncertain` for user spot-check.
-   - **`ats: "skip"`** — just record the URL but don't fetch. Useful if the user wants to remember the company but not bother with extraction (e.g. the careers page is JS-heavy and the LLM extractor would struggle, OR they're tracking it manually).
 
-   Ask: *"This company's careers page isn't on a supported ATS. Want me to scrape it with LLM extraction (~$0.01 per fire), or skip fetching and just remember the URL?"* Default suggestion is **scrape** if the page looks like a typical careers listing; skip if it's clearly a single-job blurb or a redirect.
+1. **If careers_url provided:** call `ats_adapters.ats_from_url(url)`:
+   - Returns `(ats, slug)` for any of the 6 supported ATSes (Ashby / Greenhouse incl. EU / Lever / Comeet / Teamtailor / Homerun) → store `{name, ats, slug, careers_url, source: "user_added"}`.
+   - Returns `None` (URL doesn't match a known ATS) → offer the user two options:
+     - **`ats: "scrape"`** — Claude Code agent extraction at fire time (the `scrape-extract` agent — runs on your Claude.ai subscription quota, no API key needed). Each fire dispatches scrape-extract per scrape-tracked company; ~12–50K input tokens per page, Haiku-equivalent.
+     - **`ats: "skip"`** — just record the URL but don't fetch. Use this if the careers page is a JS-heavy SPA that scrape-extract won't handle, OR the user wants to track manually.
 
-**Local mode:** write the resulting array to `./config/favorites.json` (replacing samples).
+   Ask: *"This company's careers page isn't on a supported ATS. Want me to extract listings with the scrape-extract agent (Claude Code agent, ~Haiku tokens per page), or skip fetching and just remember the URL?"* Default suggestion is **scrape** if the page looks like a typical careers listing; **skip** if it's clearly a single-job blurb or a redirect.
 
-**Cloud mode:** use `notion-update-page` (replace_content) to set the body of the AI 50 Favorites page to a single ```json code block containing the array. Leave `config/favorites.json` as the shipped template.
+2. **If careers_url not provided** (just a name): ask the user to paste the URL. If they don't have it, store as `{name, ats: "skip", source: "user_added"}` placeholder — they can update later via `extend-companies`.
 
-If they skip: in local mode leave the sample favorites.json in place; in cloud mode write `[]` to the AI 50 Favorites page.
+After processing all entries, show the proposed list and confirm before writing.
+
+**Local mode:** write the resulting array to `./config/custom-companies.json`.
+
+**Cloud mode:** use `notion-update-page` (replace_content) to set the body of the Extended Companies List page to a single ```json code block containing the array.
+
+### After either path
+
+Print a hint to the user:
+
+```
+You can add/remove/update custom companies anytime by typing:
+  "extend companies"   (interactive flow — paste URLs, edit, list, cleanup)
+
+To preview extraction quality on a careers page before committing it
+as scrape-tracked, type:
+  "scrape this page: <url>"   (one-off extraction, no tracking)
+```
 
 ---
 
@@ -883,7 +928,8 @@ Auth:        {Notion MCP / Notion API token}
 Mode:        {Cloud Routine / Local}
 
 To run your first search:  run the job search
-To add favorites:          validate favorites
+To add custom companies:   extend companies
+To preview a careers page: scrape this page: <url>
 To schedule weekly runs:   claude.ai/code/routines
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
