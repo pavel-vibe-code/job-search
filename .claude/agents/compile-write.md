@@ -27,7 +27,7 @@ This agent intentionally does NOT declare a `tools:` allowlist in its frontmatte
 
 ### `notion_call` — the dispatch abstraction
 
-Read `connectors.json[notion.auth_method]` first. There are two transports; both expose the same conceptual operations.
+`auth_method` MUST be passed explicitly by the orchestrator in the prompt (see run-job-search SKILL.md Pass 3 inputs). Do **not** read it from `connectors.json[notion.auth_method]` — that field may be `null` in a Routine cold-start (shipped template value). If `auth_method` is absent from the prompt, abort and ask the orchestrator to re-invoke with it set. There are two transports; both expose the same conceptual operations.
 
 **If `auth_method == "mcp"`:**
 

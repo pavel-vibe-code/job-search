@@ -44,6 +44,8 @@ In a **Cloud Routine** the sentinel is reset on every cold start; the Routine se
 2. Read `connectors.json[connector_type]`. For Routine compatibility this should be `"notion"` (markdown is fallback only).
 3. Read `./state/.setup_complete` to determine `deployment_mode` (cloud / local) and `auth_method` (mcp / api_token).
 
+**`connectors.json` is read-only at runtime.** The setup wizard owns this file; the orchestrator and all downstream scripts must never write to it. In Routine cold-starts the Routine setup script re-creates `state/.setup_complete` with the correct `auth_method` — connectors.json may still show `null` for that field (it is the shipped template). Always use the sentinel as the authoritative source for `auth_method` and `deployment_mode`; do not attempt to "fix" connectors.json if those values differ.
+
 ### Step P-2 — MCP prefix re-probe (auth_method == "mcp" only)
 
 Connector-installed Notion uses a UUID server-id that can rotate on reconnect, so the cached `mcp_tool_prefix` may be stale. Cheap probe:
@@ -160,7 +162,7 @@ If parsing fails (page edited to invalid JSON, missing code block), abort with:
 
 #### Hydration — branch on auth_method
 
-Read `connectors.json[notion.auth_method]` to decide.
+Use `auth_method` resolved from the sentinel in P-1 — do **not** re-read `connectors.json[notion.auth_method]` here. In a Routine cold-start that field may be `null` (shipped template value) even when the sentinel correctly records `"api_token"`.
 
 **`auth_method == "api_token"` (Routine-friendly path):**
 
@@ -265,12 +267,16 @@ Inputs to pass (write to /tmp/pass3-input.json):
 Other paths (passed inline):
   - Profile path:         /tmp/profile.json (cloud mode) or config/profile.json (local)
   - Connectors path:      ./config/connectors.json
+  - auth_method:          <value from sentinel, resolved in P-1 — "api_token" or "mcp">
+  - mcp_tool_prefix:      <value from connectors.json[notion.mcp_tool_prefix], only if auth_method == "mcp">
 ```
+
+The orchestrator MUST pass `auth_method` explicitly in the prompt so the agent does not need to infer it from `connectors.json` (which may show `null` in a Routine cold-start). See the read-only note in P-1.
 
 Prompt:
 > "Score each candidate using the profile rubric (max_score, criteria, bonuses, exclusion_rules from profile.json — see agents/compile-write.md Step 3 for the algorithm). Apply hard exclusions FIRST (see Step 2). Write qualifying live jobs with `Status: New`. Write uncertains that pass hard exclusions with `Status: Uncertain` (no scoring required for uncertains — user triages in Notion). Mark removed_jobs as Closed. Return newly written jobs (live AND uncertain).
 >
-> Notion writes use scripts/notion-api.py for api_token mode, or the resolved MCP prefix for mcp mode (read connectors.json[notion.auth_method] to decide). On Notion write failure, do NOT fall back to markdown silently — abort and report. The orchestrator decides fallback strategy."
+> Notion writes: auth_method is **{auth_method}** (passed explicitly — do not re-read from connectors.json). Use scripts/notion-api.py for api_token, or mcp_tool_prefix **{mcp_tool_prefix}** for mcp. On Notion write failure, do NOT fall back to markdown silently — abort and report. The orchestrator decides fallback strategy."
 
 `static_notifications` and `external_companies` are **not** written to the tracker — they're surfaced in the final output only.
 
