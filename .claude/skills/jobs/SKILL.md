@@ -40,8 +40,13 @@ Tune scoring quality:
   • recycle feedback             — fold tracker labels into next-run prompt
                                     (auto-fires weekly; manual trigger here) (`/jobs-recycle-feedback`)
 
+Edit profile settings:
+  • settings                     — change any single profile field (location,
+                                    role types, scoring options, hard exclusions,
+                                    CV, etc.) — preserves everything else   (`/jobs-settings`)
+
 Setup / re-config:
-  • set up the plugin            — run setup wizard (initial install or re-config)  (`/jobs-setup`)
+  • set up the plugin            — run setup wizard (initial install or full re-config)  (`/jobs-setup`)
 
 Help:
   • jobs                         — show this menu                          (`/jobs`)
