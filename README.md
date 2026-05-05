@@ -85,8 +85,9 @@ This plugin owns the scattered-source problem: fetches everything, runs your fil
 ## Documentation
 
 - **[INSTALL.md](INSTALL.md)** — installation + Cloud Routine setup, two paths (local interactive, cloud scheduled)
+- **[GUIDE.md](GUIDE.md)** — user guide: every command explained, common workflows, tracker layout, cost guide, troubleshooting
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — full technical reference: pipeline, discovery layer, scoring, failure handling, technology choices
-- **[CHANGELOG.md](CHANGELOG.md)** — release notes; v1.0.0 is the first public release (built on internal iteration v2.x → v4.x)
+- **[CHANGELOG.md](CHANGELOG.md)** — release notes
 
 ---
 

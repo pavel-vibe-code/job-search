@@ -12,20 +12,21 @@ This document describes how the plugin is built and why. For installation and Ro
 ┌────────────────────────────────────────────────────────────────────┐
 │ Plugin source (Git, generic, shareable)                             │
 │   .claude/skills/     jobs (menu), jobs-setup, jobs-run,            │
-│                       jobs-extend-companies,                       │
-│                       jobs-scrape-page,                                  │
-│                       jobs-recycle-feedback, jobs-recalibrate         │
+│                       jobs-extend-companies, jobs-scrape-page,      │
+│                       jobs-recycle-feedback, jobs-recalibrate,      │
+│                       jobs-rescore, jobs-settings                   │
 │   .claude/agents/     search-roles, validate-urls,                  │
-│                       compile-write, notify-hot                     │
+│                       compile-write, notify-hot, scrape-extract     │
 │   scripts/            notion-api.py, fetch-and-diff.py,             │
-│                       validate-jobs.py, ats_adapters.py (v3.1.0),   │
+│                       validate-jobs.py, ats_adapters.py,            │
 │                       build-state-chunks.py, validate-favorites.py, │
 │                       diff-scrape.py                                │
 │   scripts/schemas/    tracker_db.json, state_db.json                │
 │   config/             companies.json (AI 50 list),                  │
 │                       connectors.json (names + auth),               │
-│                       profile.json (sample), custom-companies.json (sample)│
-│   tests/              172 unit tests for filter logic               │
+│                       profile.json (sample),                        │
+│                       custom-companies.json (sample)                │
+│   tests/              unit tests for filter logic                   │
 └────────────────────────────────────────────────────────────────────┘
                               │
                               │ install / clone
@@ -44,8 +45,9 @@ This document describes how the plugin is built and why. For installation and Ro
 │ User's Notion workspace                                             │
 │   📄 AI 50 Job Search                       (parent page, anchor)   │
 │   ├── 📊 Job Tracker                        (database)              │
-│   │     • Title / Company / Score / Location / Status / URL /      │
-│   │       Department / Source / Date Added / Why Fits              │
+│   │     • Title / Company / Score / Match / Location / Status /    │
+│   │       URL / Department / Source / Date Added / Why Fits /      │
+│   │       Key Factors / Match Quality / Feedback Comment / Recycled│
 │   │     • One row per qualifying job                                │
 │   ├── 📁 Hot Lists                          (parent page)           │
 │   │     • One child page per run = dated digest                     │
@@ -56,6 +58,8 @@ This document describes how the plugin is built and why. For installation and Ro
 │   └── 📄 Extended Companies List (cloud only) (page; JSON in body)  │
 └────────────────────────────────────────────────────────────────────┘
 ```
+
+The plugin ships nine skills: `jobs` (menu), `jobs-setup`, `jobs-run`, `jobs-extend-companies`, `jobs-scrape-page`, `jobs-recycle-feedback`, `jobs-recalibrate`, `jobs-rescore`, and `jobs-settings`.
 
 Per-user data lives in three places: a token file (the secret), `cached-ids.json` (the Notion IDs the runtime resolved), and the Notion workspace itself (the actual job content + per-run state). The plugin source ships with sample/template data only — no per-user state in Git.
 
@@ -141,9 +145,10 @@ MCP has nicer ergonomics for one-off interactive sessions — no token to mint, 
 ┌──────────────────┐
 │  Pass 3          │  compile-write agent:
 │  ~30-60 seconds  │   • Apply hard exclusions (language, role category)
-│  score & write   │   • Score against profile.json[scoring]
+│  score & write   │   • Score against profile (CV-grounded LLM judgment
+│                  │     when cv_json present, structured rubric otherwise)
 │                  │   • Query tracker DB for dedup (skip existing URLs)
-│                  │   • Write rows scoring ≥ minimum_score
+│                  │   • Write rows scoring ≥ minimum_score (or High/Mid)
 │                  │   • Mark removed_jobs as Closed
 │                  │   • On failure: emit /tmp/compile-write-failed.json
 └──────────────────┘
@@ -159,16 +164,16 @@ MCP has nicer ergonomics for one-off interactive sessions — no token to mint, 
         ▼
 ┌──────────────────┐
 │  Pass 5          │  notify-hot agent:
-│  ~10 seconds     │   • Filter newly-written to score ≥ hot_threshold
-│  hot list digest │   • Format markdown digest                      (legacy path)
-│                  │   • OR: render High-bucket entries by confidence (v3 path)
+│  ~10 seconds     │   • Filter newly-written to High bucket (or
+│  hot list digest │     score ≥ hot_threshold on the structured path)
+│                  │   • Format markdown digest, ordered by confidence
 │                  │   • Create child page under hot-list parent
 │                  │   • Always create one (even on "no hot matches")
 └──────────────────┘
         │
         ▼
 ┌──────────────────┐
-│  Pass 6          │  jobs-recycle-feedback skill (v3.0.5 auto-trigger):
+│  Pass 6          │  jobs-recycle-feedback skill (auto-trigger):
 │  optional        │   • Gate: cloud mode AND profile.cv_json present
 │  ~10-20 seconds  │     AND state/last_recycle.json older than 7 days
 │  feedback loop   │   • Read tracker rows with Match Quality + !Recycled
@@ -178,7 +183,7 @@ MCP has nicer ergonomics for one-off interactive sessions — no token to mint, 
 └──────────────────┘
         │
         ▼
-   Run summary printed (incl. token usage + cost — v3.0.5)
+   Run summary printed (incl. token usage + cost estimate)
 ```
 
 **Total runtime:** 60-90 seconds for a typical run on 50 companies (Pass 6 adds ~10-20s when it fires; skipped most weeks).
@@ -187,11 +192,11 @@ MCP has nicer ergonomics for one-off interactive sessions — no token to mint, 
 
 ## 5. Step P-3 — the discovery layer
 
-The most distinctive piece of v2.3+ architecture (carried through v3.x unchanged). It replaces "user commits Notion IDs to their fork" with "plugin resolves IDs from names at run time."
+The discovery layer replaces "user commits Notion IDs to their fork" with "plugin resolves IDs from names at run time."
 
-### 5.1 The problem
+### 5.1 The problem it solves
 
-Pre-v2.3, `connectors.json` contained the user's tracker DB ID, hot-list page ID, etc. — values generated during setup, unique per user. Sharing the plugin meant every user had to fork the repo and commit their personal IDs. Friction; merge pain on updates; private data accidentally pushed to public forks.
+If `connectors.json` contained the user's tracker DB ID, hot-list page ID, etc. — values generated during setup, unique per user — sharing the plugin would mean every user has to fork the repo and commit their personal IDs. Friction; merge pain on updates; private data accidentally pushed to public forks.
 
 ### 5.2 The solution — three-tier resolution
 
@@ -273,7 +278,7 @@ Typical drop rate: 95-99% of fetched jobs. AI companies post engineering-heavy j
 
 `classify_region(location)` maps a free-form location string to one of: `PRAGUE`, `UK_IE`, `APAC`, `LATAM`, `MEA`, `NORTH_AMERICA`, `EU_NON_UK`, `GLOBAL_REMOTE`, `UNKNOWN`. Order of precedence is narrow→broad (PRAGUE before EU_NON_UK; UK_IE before EU_NON_UK so London doesn't get EU benefits).
 
-A defensive guard rejects strings containing negation prefixes (`non-`, `not `, `no `, `exclud-`) — without it, wizard meta-phrases like `"all non-EU"` would match the EU regex (hyphen is a word boundary) and silently exclude the candidate's home region. (This was a real bug discovered during the v2.3 E2E test.)
+A defensive guard rejects strings containing negation prefixes (`non-`, `not `, `no `, `exclud-`) — without it, wizard meta-phrases like `"all non-EU"` would match the EU regex (hyphen is a word boundary) and silently exclude the candidate's home region.
 
 ### 6.3 Stage C — regional remote score
 
@@ -290,7 +295,7 @@ Remote:
 Hybrid:
   excluded            → 0
   home_region match   → 3 (commute viable)
-  eligible region     → 1 (relocation downgrade)  ← v2.3 fix
+  eligible region     → 1 (relocation downgrade)
   other               → 0
 
 Onsite:
@@ -300,7 +305,7 @@ Onsite:
   other               → 0
 ```
 
-The hybrid relocation downgrade is a v2.3 fix — pre-v2.3, "Hybrid Berlin" scored 0 even for a Lisbon candidate explicitly open to EU relocation, suppressing legitimate matches.
+The hybrid relocation downgrade ensures listings like "Hybrid Berlin" still surface for a Lisbon candidate explicitly open to EU relocation, rather than scoring 0 and being suppressed.
 
 ### 6.4 What the agent does vs what the script does
 
@@ -311,19 +316,22 @@ script: new_jobs (raw diff) ──► agent applies filters ──► candidates
                                                        └─► filtered_out (count only, for stats)
 ```
 
-**Why this split:** classification and scoring lookups are pure functions tested by `tests/test_region.py` + `tests/test_personas.py` (172 unit tests as of v3.3.0). The agent only orchestrates; correctness of the rules lives in versioned, tested Python.
+**Why this split:** classification and scoring lookups are pure functions tested by `tests/test_region.py` + `tests/test_personas.py`. The agent only orchestrates; correctness of the rules lives in versioned, tested Python.
 
 ---
 
 ## 7. Scoring rubric (Pass 3 details)
 
-> **v3.0 architectural shift (now the recommended path).** The structured numeric rubric documented in §7.1–§7.4 below is the **legacy path**, still honored for profiles created by pre-v3 wizards or for users who skip CV upload during setup. v3.0 introduced — and v3.x makes default — hard exclusions filtering aggressively first (deterministic, free), then surviving candidates get LLM-judged categorical scoring (`High` / `Mid` / `Low`) against a CV-grounded free-text profile. The compile-write agent picks the path based on whether `profile.cv_json` is present. See §7.5 below.
->
-> v3.0.0 also closes the loop with a **Notion-feedback learning layer** — the `jobs-recycle-feedback` skill processes user-labeled tracker rows weekly, deriving anti-patterns and few-shot examples that get injected into the next run's Pass 3 LLM prompt. See §7.6.
+The plugin supports two scoring paths. The compile-write agent picks the path based on whether `profile.cv_json` is present:
+
+- **CV-grounded LLM judgment (default when `cv_json` is present).** Hard exclusions filter aggressively first (deterministic, free), then surviving candidates get LLM-judged categorical scoring (`High` / `Mid` / `Low`) against a CV-grounded free-text profile. See §7.5.
+- **Structured numeric rubric (fallback).** A weighted-criteria score is computed deterministically. Used when `cv_json` is not present. See §7.1–§7.4.
+
+The plugin also closes the loop with a **Notion-feedback learning layer** — the `jobs-recycle-feedback` skill processes user-labeled tracker rows weekly, deriving anti-patterns and few-shot examples that get injected into the next run's Pass 3 LLM prompt. See §7.6.
 
 The setup wizard collects criteria + priorities (high/medium/low) in plain English; the wizard's agent reflects on the input and proposes weights + thresholds. The user approves / adjusts / re-thinks.
 
-### 7.1 Schema in profile.json
+### 7.1 Schema in profile.json (structured path)
 
 ```json
 {
@@ -351,21 +359,9 @@ The setup wizard collects criteria + priorities (high/medium/low) in plain Engli
 
 ### 7.2 Hard exclusions (applied BEFORE scoring)
 
-Two coexisting forms — legacy free-text and typed schema:
+Two coexisting forms — typed schema (preferred) and legacy free-text:
 
-**Legacy (still supported):** `profile.json[exclusion_rules]`, an array of free-text rules interpreted by the compile-write agent at scoring time.
-
-```json
-[
-  "Job explicitly requires fluency in a language not in candidate.spoken_languages",
-  "Pure Engineering roles (SWE, Backend, ML Engineer-IC unless customer-facing AI)",
-  "Pure Sales / Marketing / Operations roles",
-  "Entry-level or junior roles (under 5 years experience)",
-  "Located outside the EU, OR in the UK or Ireland"
-]
-```
-
-**Typed schema (introduced v2.5.0):** `profile.json[hard_exclusions]`, a structured block consumers can apply deterministically at Pass 1 (fetch-and-diff) before any LLM scoring.
+**Typed schema:** `profile.json[hard_exclusions]`, a structured block consumers apply deterministically at Pass 1 (fetch-and-diff) before any LLM scoring.
 
 ```json
 {
@@ -380,11 +376,23 @@ Two coexisting forms — legacy free-text and typed schema:
 }
 ```
 
-Why two forms: existing profiles (pre-v2.5) only have `exclusion_rules`, so consumers fall back to it when `hard_exclusions` is absent or empty. New profiles (v2.5+ wizard) generate `hard_exclusions` as the primary form. Eventually free-text `exclusion_rules` is for nuanced judgment-call rules that still need LLM interpretation; structured types handle deterministic filters.
+**Legacy free-text:** `profile.json[exclusion_rules]`, an array of free-text rules interpreted by the compile-write agent at scoring time.
+
+```json
+[
+  "Job explicitly requires fluency in a language not in candidate.spoken_languages",
+  "Pure Engineering roles (SWE, Backend, ML Engineer-IC unless customer-facing AI)",
+  "Pure Sales / Marketing / Operations roles",
+  "Entry-level or junior roles (under 5 years experience)",
+  "Located outside the EU, OR in the UK or Ireland"
+]
+```
+
+Why two forms: profiles without a typed `hard_exclusions` block fall back to `exclusion_rules`. New profiles generate `hard_exclusions` as the primary form. Free-text `exclusion_rules` is for nuanced judgment-call rules that still need LLM interpretation; structured types handle deterministic filters.
 
 Compile-write applies these first; matched jobs are dropped without scoring. Counts are reported in the run summary so the user can sanity-check the filter.
 
-### 7.3 The scoring algorithm
+### 7.3 The scoring algorithm (structured path)
 
 ```python
 score = sum(criteria[c].weight * partial(c, job) for c in criteria)
@@ -394,23 +402,23 @@ score = max(0, min(score, max_score))   # floor 0, cap at max_score
 
 Where `partial(c, job)` returns 0 (no match), 0.5 (partial), or 1 (full match).
 
-**Critical correctness rule:** the agent reads `criteria` + `bonuses` from `profile.json` and uses NO inline default rubric. Earlier versions had hardcoded defaults that contradicted what users configured during setup. A test (`test_v2_3_no_inline_default_rubric` — TODO add) should pin this.
+**Critical correctness rule:** the agent reads `criteria` + `bonuses` from `profile.json` and uses NO inline default rubric. Inline defaults would silently contradict what the user configured during setup.
 
 ### 7.4 "Why Fits" rationale
 
 Each written row gets a 2-3 sentence explanation naming the criteria it scored on, with weights. The user reads this in the tracker to understand *why* each role surfaced — invaluable for tuning the rubric over time.
 
-### 7.5 v3.0 hybrid scoring path (CV-grounded LLM judgment)
+### 7.5 CV-grounded LLM scoring path
 
-When `profile.cv_json` is present, compile-write switches to the v3 path. Numeric Score becomes irrelevant; categorical Match takes its place.
+When `profile.cv_json` is present, compile-write switches to the LLM path. The categorical Match column (High / Mid / Low) is the primary signal; the numeric Score column is left null on this path.
 
-**v3 profile schema additions:**
+**Profile schema additions:**
 
-The wizard's Q7 free-text answer (already stored as `profile.context`) serves as the narrative — wants/avoids/aspirations/target patterns. v3 reads `profile.context` as the narrative; no new `narrative` field needed.
+The wizard's free-text background answer (stored as `profile.context`) serves as the narrative — wants/avoids/aspirations/target patterns. The LLM scoring path reads `profile.context` as the candidate intent.
 
 ```json
 {
-  "context": "Wizard's Q7 — free-text background, goals, preferences. Read by v3 LLM scoring as the candidate intent.",
+  "context": "Free-text background, goals, preferences. Read by LLM scoring as the candidate intent.",
 
   "cv_json": {
     "extracted_at": "2026-05-03",
@@ -429,7 +437,7 @@ The wizard's Q7 free-text answer (already stored as `profile.context`) serves as
     "extracted_keywords": [/* ~30 phrases — technical + functional + domain */]
   },
 
-  "hard_exclusions": { /* typed schema from v2.5.0 */ },
+  "hard_exclusions": { /* typed schema */ },
 
   "scoring": {
     "instructions": "Optional free-text LLM scoring hint, e.g. 'be strict on AI-native vs AI-bolt-on; reward customer-facing leadership over IC roles'."
@@ -437,31 +445,31 @@ The wizard's Q7 free-text answer (already stored as `profile.context`) serves as
 }
 ```
 
-**v3 Pass 3 flow:**
+**Pass 3 flow on the LLM path:**
 
-1. **Hard exclusions** (typed `hard_exclusions.rules` from v2.5.0): drop candidate before any LLM call.
+1. **Hard exclusions** (typed `hard_exclusions.rules`): drop candidate before any LLM call.
 2. **Build LLM scoring prompt** for each survivor:
    - Profile (cv_json + narrative + hard_exclusions for context)
-   - Few-shot examples from v3.0.0 jobs-recycle-feedback (when available — empty in v3.0-rc1)
+   - Few-shot examples from the feedback-recycle store (when available)
    - Listing (title, company, location, full JD)
    - Task: list `match:` / `concern:` / `gap:` factors comparing profile attrs to JD requirements; assign `High` / `Mid` / `Low`.
-3. **Single Sonnet/Haiku call per candidate.** Output: `{verdict, rationale, key_factors, confidence}`.
-4. **Write to tracker** with new columns: `Match` (verdict), `Reasoning` (rationale), `Key Factors` (bulleted match/concern/gap), `Score: null` (legacy column unused in v3 path), `Why Fits` populated with rationale (back-compat for users who filter by it).
+3. **Single model call per candidate.** Output: `{verdict, rationale, key_factors, confidence}`.
+4. **Write to tracker** with: `Match` (verdict), `Key Factors` (bulleted match/concern/gap), `Score: null` (column unused on this path), `Why Fits` populated with rationale (back-compat for users who filter by it).
 5. **Hot list = High bucket.** `notify-hot` digest renders High entries ordered by `confidence` (high → first).
 
 **Bucket assignment rule:** Match density between profile attributes and JD requirements drives the bucket, with critical-concern weighting. High = matches dominate AND no critical concerns. Mid = mixed or sparse-JD default. Low = few matches or major requirements unmet. The LLM prompt forces explicit factor enumeration (the `key_factors` field) so bucket assignment is inspectable.
 
-**Default model:** Claude Opus 4.7 with extended thinking enabled (`{type: "enabled", budget_tokens: 4000}`). Opus is meaningfully stronger at multi-criteria evaluation and JD-decomposition than Sonnet/Haiku — see CHANGELOG v3.0.2 for the rationale. Users who prefer cost over quality can override via `profile.scoring.instructions: "use sonnet for cost"` (or `"use haiku"`).
+**Default model:** Claude Opus with extended thinking enabled (`{type: "enabled", budget_tokens: 4000}`). Opus is meaningfully stronger at multi-criteria evaluation and JD-decomposition than Sonnet/Haiku. Users who prefer cost over quality can override via `profile.scoring.instructions: "use sonnet for cost"` (or `"use haiku"`).
 
-**Cost framing:** ~$20–50/run on Opus 4.7 with extended thinking (typical run, ~200 candidates surviving hard exclusions). ~$5–15/run if overridden to Sonnet 4.6. ~$1–2/run on Haiku, with degraded rationale quality. Anthropic prompt caching is mandatory for the constant profile section — N-1 cache hits per run amortize the per-call cost. Run summary prints aggregate token usage + cost estimate per pass (v3.0.5+).
+**Cost framing:** ~$20–50/run on Opus with extended thinking (typical run, ~200 candidates surviving hard exclusions). ~$5–15/run if overridden to Sonnet. ~$1–2/run on Haiku, with degraded rationale quality. Anthropic prompt caching is mandatory for the constant profile section — N-1 cache hits per run amortize the per-call cost. Run summary prints aggregate token usage + cost estimate per pass.
 
-**Backward compat:** profiles without `cv_json` continue using the legacy structured-rubric path documented in §7.1–§7.4.
+**Backward compat:** profiles without `cv_json` use the structured-rubric path documented in §7.1–§7.4.
 
-### 7.6 Feedback-recycle learning loop (Pass 6 — v3.0.0)
+### 7.6 Feedback-recycle learning loop (Pass 6)
 
-The v3 path becomes a learning loop via the `jobs-recycle-feedback` skill, auto-triggered as Pass 6 of the orchestrator (gated on cloud mode + `profile.cv_json` present + ≥7 days since last cycle; v3.0.5+).
+The LLM path becomes a learning loop via the `jobs-recycle-feedback` skill, auto-triggered as Pass 6 of the orchestrator (gated on cloud mode + `profile.cv_json` present + ≥7 days since last cycle).
 
-**Tracker DB columns added in v3.0.0:**
+**Tracker DB columns supporting feedback:**
 
 - `Match Quality` (select: `Great` / `OK` / `Bad`) — user feedback. Vocabulary deliberately matches `Match` (LLM verdict) so disagreements are direct comparisons.
 - `Feedback Comment` (rich text) — user explanation, free text.
@@ -497,7 +505,7 @@ The State DB has one row per company. Schema:
 
 ### Why body, not property
 
-v2.1.0 stored job IDs in a single `rich_text` property. Notion silently truncated at 2000 chars per element. High-volume companies (Cohere with 200+ jobs, OpenAI with 651, Databricks with 829) had their state corrupted invisibly — every run treated them as "fresh" and re-emitted every job as new. v2.2.0+ moved to body storage with multi-element splitting; the `Job count` property is a tripwire that should equal the body array length.
+Storing job IDs in a single `rich_text` property hits Notion's 2000-char-per-element silent truncation. High-volume companies (Cohere with 200+ jobs, OpenAI with 651, Databricks with 829) have their state corrupted invisibly — every run treats them as "fresh" and re-emits every job as new. Body storage with multi-element splitting avoids this; the `Job count` property is a tripwire that should equal the body array length.
 
 ### Chunking + sequential writes
 
@@ -531,9 +539,9 @@ The agent returns `{"error": "...", "fallback_file": "/tmp/<agent>-failed.json"}
 
 ### 9.2 The state-poisoning bug this prevents
 
-Pre-v2.3 had a subtle correctness hole: when compile-write failed, the orchestrator continued to Pass 4. Pass 4 persisted `/tmp/ai50-state.json` (which already contained the failed job IDs as "seen" — Pass 1 added them when fetching). Future runs would treat those IDs as already-handled and never retry them, even though they never made it to the tracker.
+Without this fallback handler, a subtle correctness hole exists: when compile-write fails, the orchestrator continues to Pass 4. Pass 4 persists `/tmp/ai50-state.json` (which already contains the failed job IDs as "seen" — Pass 1 added them when fetching). Future runs would treat those IDs as already-handled and never retry them, even though they never made it to the tracker.
 
-The v2.3 fallback handler removes `failed_ats_job_ids` from `/tmp/ai50-state.json` BEFORE Pass 4 persists. Next run's diff sees them as new and retries the write. Self-healing.
+The fallback handler removes `failed_ats_job_ids` from `/tmp/ai50-state.json` BEFORE Pass 4 persists. Next run's diff sees them as new and retries the write. Self-healing.
 
 ### 9.3 Orchestrator behavior on missing/malformed agent response
 
@@ -567,21 +575,19 @@ The trade-off: `rich_text` per-element 2000-char limit forced the multi-element-
 
 ### 10.3 ATS APIs over scraping
 
-Pre-v2.3 used JavaScript-driven scraping of SPA-rendered ATS sites (Ashby, Lever). Discovered ~65% false-negative rate for closed-job detection because non-JS clients see only an empty shell.
-
-Switched to the providers' public posting APIs. As of v3.1.1, six ATS are first-class supported (fetch + validate via deterministic API), plus a generic LLM-extracted fallback (`scrape`, v3.2.0):
+JavaScript-driven scraping of SPA-rendered ATS sites (Ashby, Lever) yields a high false-negative rate for closed-job detection because non-JS clients see only an empty shell. The plugin uses the providers' public posting APIs instead. Six ATS are first-class supported (fetch + validate via deterministic API), plus a generic LLM-extracted fallback (`scrape`):
 
 - **ashby** — `api.ashbyhq.com/posting-api/job-board/<slug>`
-- **greenhouse** — `boards-api.greenhouse.io/v1/boards/<slug>/jobs` (classic) and `boards-api.eu.greenhouse.io/...` (EU data residency, v3.1.1). The fetcher tries both hosts so customers like Parloa / JetBrains on the EU subdomain don't silently 404.
-- **lever** — `api.lever.co/v0/postings/<slug>?mode=json` (v3.1.0 validate, v3.1.1 fetch)
+- **greenhouse** — `boards-api.greenhouse.io/v1/boards/<slug>/jobs` (classic) and `boards-api.eu.greenhouse.io/...` (EU data residency). The fetcher tries both hosts so customers like Parloa / JetBrains on the EU subdomain don't silently 404.
+- **lever** — `api.lever.co/v0/postings/<slug>?mode=json`
 - **comeet** — `www.comeet.com/careers-api/2.0/company/<id>/positions?token=...` (token scraped from the public careers HTML)
-- **teamtailor** (v3.1.1) — `<slug>.teamtailor.com/api/v1/jobs?page[size]=200` (JSON:API)
-- **homerun** (v3.1.1) — `api.homerun.co/v1/jobs/?company_subdomain=<slug>`
-- **scrape** — generic agent-extracted careers-page fallback. For companies whose ATS isn't in the supported set (Workable, Personio, Recruitee, custom-built careers pages), the user opts in per-company via `{ats: "scrape", careers_url: "..."}` in their custom-companies list. Implemented as a Claude Code agent (`.claude/agents/scrape-extract.md`) so users don't need an Anthropic API key — extraction runs against their Claude.ai subscription quota the same way other agents do. (Pre-v1.0.0 internal versions implemented this via direct `urllib` calls to `api.anthropic.com`, which required `ANTHROPIC_API_KEY`; v1.0.0 reimplemented it as an agent.) Pipeline: `fetch-and-diff.py` emits `/tmp/needs_scraping.json`; the `search-roles` agent dispatches `scrape-extract` per company in parallel; `scripts/diff-scrape.py` computes the new/removed delta against state. Standalone use: the `/scrape-page` skill wraps the same agent for ad-hoc extraction-quality testing on a single URL. No deterministic API to validate against, so scrape candidates land as `Status: Uncertain` in the tracker.
+- **teamtailor** — `<slug>.teamtailor.com/api/v1/jobs?page[size]=200` (JSON:API)
+- **homerun** — `api.homerun.co/v1/jobs/?company_subdomain=<slug>`
+- **scrape** — generic agent-extracted careers-page fallback. For companies whose ATS isn't in the supported set (Workable, Personio, Recruitee, custom-built careers pages), the user opts in per-company via `{ats: "scrape", careers_url: "..."}` in their custom-companies list. Implemented as a Claude Code agent (`.claude/agents/scrape-extract.md`) so users don't need a separate Anthropic API key — extraction runs against their Claude.ai subscription quota the same way other agents do. Pipeline: `fetch-and-diff.py` emits `/tmp/needs_scraping.json`; the `search-roles` agent dispatches `scrape-extract` per company in parallel; `scripts/diff-scrape.py` computes the new/removed delta against state. Standalone use: the `jobs-scrape-page` skill wraps the same agent for ad-hoc extraction-quality testing on a single URL. No deterministic API to validate against, so scrape candidates land as `Status: Uncertain` in the tracker.
 
 These are public (no auth required for read where possible), well-documented, and stable. The plugin caches no data from them — every run fetches fresh.
 
-Adding a new deterministic ATS post-v3.1.0 is a one-place change: add a registry entry to `scripts/ats_adapters.py` (URL pattern + active-id fetcher + `active_validate_supported` flag) and add a fetch + normalize pair to `fetch-and-diff.py`'s `FETCHER_DISPATCH`. See §10.7 below.
+Adding a new deterministic ATS is a one-place change: add a registry entry to `scripts/ats_adapters.py` (URL pattern + active-id fetcher + `active_validate_supported` flag) and add a fetch + normalize pair to `fetch-and-diff.py`'s `FETCHER_DISPATCH`. See §10.7 below.
 
 ### 10.4 Threaded HTTP via stdlib
 
@@ -589,15 +595,15 @@ Adding a new deterministic ATS post-v3.1.0 is a one-place change: add a registry
 
 ### 10.5 Tests: stdlib `unittest`
 
-`tests/run.sh` uses `python3 -m unittest discover` — no pytest install required. 172 tests run in ~3ms. The test layer pins region classification and score-table semantics, which are the two places where bugs hide longest (per the v2.3 retro: both filter bugs were latent in v2.2.x because the tests didn't cover relocation-friendly personas). v3.1.0 added URL-pattern + ATS-registry tests as new ATS were folded into `ats_adapters.py`.
+`tests/run.sh` uses `python3 -m unittest discover` — no pytest install required. Tests run in ~3ms. The test layer pins region classification and score-table semantics, which are the two places where bugs hide longest. URL-pattern + ATS-registry tests guard the shared adapter module as new ATS are folded in.
 
 ### 10.6 Deterministic CLI helpers + LLM agents for synthesis only
 
 The agents (search-roles, validate-urls, compile-write, notify-hot) do orchestration + LLM-shaped work (writing fit rationales, formatting digests). All deterministic logic — region classification, score tables, ATS fetching, state diffing — lives in Python scripts the agents invoke. This split keeps the hot path testable and reduces compounding-error surface area (see §3 on auth methods).
 
-### 10.7 `ats_adapters.py` — single source of truth for ATS support (v3.1.0)
+### 10.7 `ats_adapters.py` — single source of truth for ATS support
 
-Earlier development versions duplicated ATS knowledge across three scripts (`validate-jobs.py`, `validate-favorites.py`, `fetch-and-diff.py`). The internal v3.1.0 release extracted ATS knowledge into one shared module: `scripts/ats_adapters.py`. v1.0.0 carried this further by reframing favorites as `jobs-extend-companies` (custom-tracked companies on top of the AI 50 baseline) and reimplementing the `scrape` adapter as a Claude Code agent (no API key needed).
+ATS knowledge is centralized in `scripts/ats_adapters.py` rather than duplicated across `validate-jobs.py`, `validate-favorites.py`, and `fetch-and-diff.py`.
 
 The module exports:
 
@@ -633,8 +639,8 @@ Stage 2 — Optional: Schedule a Cloud Routine    (one-time)
                       *.ashbyhq.com, *.greenhouse.io,
                       *.lever.co, *.comeet.com,
                       *.teamtailor.com, *.homerun.co, surgehq.ai
-     (api.anthropic.com is NOT needed in v1.0.0+ — all LLM work runs
-     through Claude Code agents, not direct urllib calls.)
+     (api.anthropic.com is NOT needed — all LLM work runs through
+     Claude Code agents, not direct urllib calls.)
   4. Setup script (~10 lines) — discovers plugin path, creates
      sentinel, runs auth pre-check
   5. Trigger prompt: "Run the AI 50 job search. Non-interactive
@@ -686,13 +692,15 @@ To update the profile or rubric, the user edits the AI 50 Profile Notion page di
 
 ## 13. Versioning
 
-Plugin uses semantic-ish versioning. Currently **v3.3.0** (public release candidate).
+v1.0.0 is the first public release. Public versioning starts at v1.0.0; future patches and minor versions follow semver:
 
-- **Major** bumps for breaking changes to the user-visible flow (e.g. v3.0's hybrid LLM scoring shift).
-- **Minor** bumps for new features (e.g. new ATS support, new skill) or significant refactors (v2.3 added the discovery layer; v3.1.0 added the shared `ats_adapters` registry).
+- **Major** bumps for breaking changes to the user-visible flow.
+- **Minor** bumps for new features (new ATS support, new skill) or significant refactors.
 - **Patch** bumps for bug fixes.
 
-Pre-v2.4.0 the canonical version lived in `plugin.json[version]` at the repo root, and the plugin shipped via the `--plugin-dir` mechanism. v2.4.0 dropped the manifest when the project went **project-scoped under `.claude/`** (skills + agents now live under `.claude/skills/` and `.claude/agents/` and are discovered automatically). The canonical version now lives in CHANGELOG.md's top entry; SKILL.md frontmatter versions are kept in sync per skill (each skill bumps independently when it changes).
+The canonical version lives in CHANGELOG.md's top entry; SKILL.md frontmatter versions are kept in sync per skill (each skill bumps independently when it changes).
+
+A two-track development workflow uses `dev` (integration) and per-feature branches.
 
 ---
 
@@ -711,9 +719,9 @@ Pre-v2.4.0 the canonical version lived in `plugin.json[version]` at the repo roo
 
 - `removed_jobs_pending` (closures the agent didn't reach before failing) currently relies on the next run's diff to re-surface the same removed_jobs. Edge case: if a job is briefly re-listed and re-removed in the gap, the close-mark is lost. A durable `state/pending-closures.json` queue is on the backlog.
 - No retry policy at the agent level on transient 5xx — the orchestrator-level fallback handles this, but a per-call retry inside the agent would be tighter.
-- Cloud Routine env-var visibility: `NOTION_API_TOKEN` is visible to anyone with edit access on the routine. Rotate periodically if you share access. (No `ANTHROPIC_API_KEY` is set in v1.0.0+ — the scrape ATS runs as a Claude Code agent against your Claude.ai subscription quota, not a direct API call.)
+- Cloud Routine env-var visibility: `NOTION_API_TOKEN` is visible to anyone with edit access on the routine. Rotate periodically if you share access. (No `ANTHROPIC_API_KEY` is needed — the scrape ATS runs as a Claude Code agent against your Claude.ai subscription quota, not a direct API call.)
 - Scrape adapter (`ats: scrape`) is single-page and HTML-only. Pure-SPA careers pages (Workday-style) return empty shells to non-JS clients (the scrape-extract agent surfaces this as `extraction_quality: "no_static_content"`); the user is better off finding the underlying API endpoint and adding a real ATS adapter, or marking the company `ats: skip`.
-- Token usage tracking (v3.0.5) is print-only — not persisted to a Notion Run Log or local jsonl. Trend analysis over time requires manual copy-paste into a spreadsheet.
+- Token usage tracking is print-only — not persisted to a Notion Run Log or local jsonl. Trend analysis over time requires manual copy-paste into a spreadsheet.
 
 ---
 
@@ -724,16 +732,16 @@ tests/
   run.sh                  Entry point — `bash tests/run.sh`
   _helpers.py             Shared utilities (load fetch-and-diff as a module)
   fixtures/               Sample ATS responses for fetcher tests
-  test_region.py          classify_region + build_score_table (74 tests)
-  test_personas.py        Persona-scenario score-table tests (33 tests)
+  test_region.py          classify_region + build_score_table
+  test_personas.py        Persona-scenario score-table tests
   test_diff.py            diff_company logic
   test_fetchers.py        Per-ATS normalisation
   test_normalise.py       Job-shape canonical form
 ```
 
-172 tests total (v3.3.0), runs in <1 second. No external dependencies. Run on every change to `scripts/fetch-and-diff.py`, `scripts/ats_adapters.py`, or related logic. v3.1.0 added URL-pattern + ATS-registry tests as Lever / Teamtailor / Homerun were folded into the shared adapter module.
+Tests run in <1 second. No external dependencies. Run on every change to `scripts/fetch-and-diff.py`, `scripts/ats_adapters.py`, or related logic.
 
-The persona-scenario suite (`test_personas.py`) was the v2.3 retro fix: pre-v2.3, tests covered only the Prague-Pavel home region. Filter bugs that affected EU-relocation personas slipped through. The new suite pins eight common candidate archetypes (home-city / home-region / multi-region / global-remote / on-site-only / etc.) so future archetype-specific bugs are caught.
+The persona-scenario suite (`test_personas.py`) pins eight common candidate archetypes (home-city / home-region / multi-region / global-remote / on-site-only / etc.) so archetype-specific filter bugs are caught — a single home-region test set isn't enough to surface relocation-friendly persona regressions.
 
 ---
 
