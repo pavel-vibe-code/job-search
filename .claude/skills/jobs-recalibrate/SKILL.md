@@ -1,5 +1,5 @@
 ---
-name: recalibrate-scoring
+name: jobs-recalibrate
 description: Tune the scoring rubric in profile.json based on what you saw in the last run. Show the top + bottom of the hot list, ask the user what's off, propose concrete profile mutations, write the updated profile back to Notion (cloud mode) or to ./config/profile.json (local mode). Manual-dialog version of the v3.0 learning loop. Invoke when the user says "recalibrate the scoring", "adjust the scoring rubric", "the hot list looks off", or similar.
 version: 2.5.2
 ---
@@ -15,12 +15,12 @@ After a few runs the user has empirical evidence of whether the scoring rubric m
 5. Shows predicted score deltas so the user can see what each change would do before approving.
 6. Writes the updated profile back to its source of truth.
 
-This is the manual / single-shot version. The v3.0 release adds an automated learning loop (`feedback-recycle`) that reads `Match Quality` labels users add in Notion and recycles them into profile updates without requiring a dialogue every time.
+This is the manual / single-shot version. The v3.0 release adds an automated learning loop (`jobs-recycle-feedback`) that reads `Match Quality` labels users add in Notion and recycles them into profile updates without requiring a dialogue every time.
 
 ## When NOT to invoke
 
 - Right after a fresh setup (no tracker data yet — nothing to recalibrate against).
-- If the user says "the search isn't running" — that's a configuration / wiring issue, not a scoring issue. Point them at run-job-search troubleshooting instead.
+- If the user says "the search isn't running" — that's a configuration / wiring issue, not a scoring issue. Point them at jobs-run troubleshooting instead.
 - If the user wants to add a new role type or rewrite their profile from scratch — that's the setup wizard's job. Have them run "set up the plugin" again.
 
 ## Step 1 — Read context
@@ -176,9 +176,9 @@ This skill is the **manual** version of the learning loop. v3.0 introduces:
 
 - `Match Quality` column in the tracker DB (Good / OK / Bad — same vocabulary as LLM verdict)
 - `Feedback Comment` column for free-form rationale
-- A `feedback-recycle` skill that runs at end of each fire (or on demand) and:
+- A `jobs-recycle-feedback` skill that runs at end of each fire (or on demand) and:
   - Reads recent labels
   - Synthesizes anti-patterns + few-shot examples
   - Auto-updates the profile (with user review/confirm)
 
-Until v3.0 lands, this `recalibrate-scoring` skill is how you tune the rubric — invoke it as often as needed. The dialogue this skill produces is also useful raw material for v3.0's auto-recycler when it ships.
+Until v3.0 lands, this `jobs-recalibrate` skill is how you tune the rubric — invoke it as often as needed. The dialogue this skill produces is also useful raw material for v3.0's auto-recycler when it ships.

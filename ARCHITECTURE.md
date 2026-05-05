@@ -11,9 +11,10 @@ This document describes how the plugin is built and why. For installation and Ro
 ```
 ┌────────────────────────────────────────────────────────────────────┐
 │ Plugin source (Git, generic, shareable)                             │
-│   .claude/skills/     setup, run-job-search, extend-companies,      │
-│                       scrape-page,                                  │
-│                       feedback-recycle, recalibrate-scoring         │
+│   .claude/skills/     jobs (menu), jobs-setup, jobs-run,            │
+│                       jobs-extend-companies,                       │
+│                       jobs-scrape-page,                                  │
+│                       jobs-recycle-feedback, jobs-recalibrate         │
 │   .claude/agents/     search-roles, validate-urls,                  │
 │                       compile-write, notify-hot                     │
 │   scripts/            notion-api.py, fetch-and-diff.py,             │
@@ -167,7 +168,7 @@ MCP has nicer ergonomics for one-off interactive sessions — no token to mint, 
         │
         ▼
 ┌──────────────────┐
-│  Pass 6          │  feedback-recycle skill (v3.0.5 auto-trigger):
+│  Pass 6          │  jobs-recycle-feedback skill (v3.0.5 auto-trigger):
 │  optional        │   • Gate: cloud mode AND profile.cv_json present
 │  ~10-20 seconds  │     AND state/last_recycle.json older than 7 days
 │  feedback loop   │   • Read tracker rows with Match Quality + !Recycled
@@ -318,7 +319,7 @@ script: new_jobs (raw diff) ──► agent applies filters ──► candidates
 
 > **v3.0 architectural shift (now the recommended path).** The structured numeric rubric documented in §7.1–§7.4 below is the **legacy path**, still honored for profiles created by pre-v3 wizards or for users who skip CV upload during setup. v3.0 introduced — and v3.x makes default — hard exclusions filtering aggressively first (deterministic, free), then surviving candidates get LLM-judged categorical scoring (`High` / `Mid` / `Low`) against a CV-grounded free-text profile. The compile-write agent picks the path based on whether `profile.cv_json` is present. See §7.5 below.
 >
-> v3.0.0 also closes the loop with a **Notion-feedback learning layer** — the `feedback-recycle` skill processes user-labeled tracker rows weekly, deriving anti-patterns and few-shot examples that get injected into the next run's Pass 3 LLM prompt. See §7.6.
+> v3.0.0 also closes the loop with a **Notion-feedback learning layer** — the `jobs-recycle-feedback` skill processes user-labeled tracker rows weekly, deriving anti-patterns and few-shot examples that get injected into the next run's Pass 3 LLM prompt. See §7.6.
 
 The setup wizard collects criteria + priorities (high/medium/low) in plain English; the wizard's agent reflects on the input and proposes weights + thresholds. The user approves / adjusts / re-thinks.
 
@@ -441,7 +442,7 @@ The wizard's Q7 free-text answer (already stored as `profile.context`) serves as
 1. **Hard exclusions** (typed `hard_exclusions.rules` from v2.5.0): drop candidate before any LLM call.
 2. **Build LLM scoring prompt** for each survivor:
    - Profile (cv_json + narrative + hard_exclusions for context)
-   - Few-shot examples from v3.0.0 feedback-recycle (when available — empty in v3.0-rc1)
+   - Few-shot examples from v3.0.0 jobs-recycle-feedback (when available — empty in v3.0-rc1)
    - Listing (title, company, location, full JD)
    - Task: list `match:` / `concern:` / `gap:` factors comparing profile attrs to JD requirements; assign `High` / `Mid` / `Low`.
 3. **Single Sonnet/Haiku call per candidate.** Output: `{verdict, rationale, key_factors, confidence}`.
@@ -458,13 +459,13 @@ The wizard's Q7 free-text answer (already stored as `profile.context`) serves as
 
 ### 7.6 Feedback-recycle learning loop (Pass 6 — v3.0.0)
 
-The v3 path becomes a learning loop via the `feedback-recycle` skill, auto-triggered as Pass 6 of the orchestrator (gated on cloud mode + `profile.cv_json` present + ≥7 days since last cycle; v3.0.5+).
+The v3 path becomes a learning loop via the `jobs-recycle-feedback` skill, auto-triggered as Pass 6 of the orchestrator (gated on cloud mode + `profile.cv_json` present + ≥7 days since last cycle; v3.0.5+).
 
 **Tracker DB columns added in v3.0.0:**
 
 - `Match Quality` (select: `Great` / `OK` / `Bad`) — user feedback. Vocabulary deliberately matches `Match` (LLM verdict) so disagreements are direct comparisons.
 - `Feedback Comment` (rich text) — user explanation, free text.
-- `Recycled` (checkbox) — set true once feedback-recycle has processed this row; prevents double-counting.
+- `Recycled` (checkbox) — set true once jobs-recycle-feedback has processed this row; prevents double-counting.
 
 **The recycle pipeline:**
 
@@ -596,7 +597,7 @@ The agents (search-roles, validate-urls, compile-write, notify-hot) do orchestra
 
 ### 10.7 `ats_adapters.py` — single source of truth for ATS support (v3.1.0)
 
-Earlier development versions duplicated ATS knowledge across three scripts (`validate-jobs.py`, `validate-favorites.py`, `fetch-and-diff.py`). The internal v3.1.0 release extracted ATS knowledge into one shared module: `scripts/ats_adapters.py`. v1.0.0 carried this further by reframing favorites as `extend-companies` (custom-tracked companies on top of the AI 50 baseline) and reimplementing the `scrape` adapter as a Claude Code agent (no API key needed).
+Earlier development versions duplicated ATS knowledge across three scripts (`validate-jobs.py`, `validate-favorites.py`, `fetch-and-diff.py`). The internal v3.1.0 release extracted ATS knowledge into one shared module: `scripts/ats_adapters.py`. v1.0.0 carried this further by reframing favorites as `jobs-extend-companies` (custom-tracked companies on top of the AI 50 baseline) and reimplementing the `scrape` adapter as a Claude Code agent (no API key needed).
 
 The module exports:
 
@@ -605,7 +606,7 @@ The module exports:
 - `active_ids_for(ats, slug, **kwargs)` — dispatch to the right fetcher; returns `(set_of_ids, error_or_none)`.
 - `supported_ats_for_validate()` — set of ATS names whose live state can be confirmed via API.
 
-`validate-jobs.py`, `validate-favorites.py`, and the `extend-companies` skill all call `ats_from_url()` to derive `(ats, slug)` from a pasted careers URL. The fetcher counterpart for full job lists (used by Pass 1) lives in `fetch-and-diff.py`'s `FETCHER_DISPATCH` — adding a new deterministic ATS needs both sides registered. The `scrape` ATS is special: registry entry stays for visibility, but `active_ids_fetcher` is `None` (handled by the scrape-extract agent post-fetch via `diff-scrape.py`).
+`validate-jobs.py`, `validate-favorites.py`, and the `jobs-extend-companies` skill all call `ats_from_url()` to derive `(ats, slug)` from a pasted careers URL. The fetcher counterpart for full job lists (used by Pass 1) lives in `fetch-and-diff.py`'s `FETCHER_DISPATCH` — adding a new deterministic ATS needs both sides registered. The `scrape` ATS is special: registry entry stays for visibility, but `active_ids_fetcher` is `None` (handled by the scrape-extract agent post-fetch via `diff-scrape.py`).
 
 ---
 
@@ -648,7 +649,7 @@ Stage 3 — Ongoing                                (no-op for the user)
     ├─ Plugin runs the 6-pass pipeline (~60-90s; Pass 6 fires weekly)
     ├─ New qualifying jobs land in Tracker DB
     ├─ Hot-list digest page created with the week's matches
-    ├─ feedback-recycle (when gate met) updates profile from labels
+    ├─ jobs-recycle-feedback (when gate met) updates profile from labels
     └─ User checks Notion when ready
 ```
 

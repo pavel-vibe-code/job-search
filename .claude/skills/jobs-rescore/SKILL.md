@@ -1,6 +1,6 @@
 ---
-name: re-score
-description: Re-evaluate existing tracker rows by re-running the v3 scoring prompt against them. Use this to fix rows with empty Why Fits / Key Factors (data debt from earlier runs that didn't populate them), to rescore after a profile change, or to upgrade past Sonnet-scored entries to Opus quality. Updates Why Fits, Key Factors, and Match in place; preserves user-set fields (Match Quality, Status, Feedback Comment, Recycled). Trigger phrases include "re-score", "re-evaluate tracker", "fix empty rationales", "re-run scoring on tracker", "update rationales".
+name: jobs-rescore
+description: Re-evaluate existing tracker rows by re-running the v3 scoring prompt against them. Use this to fix rows with empty Why Fits / Key Factors (data debt from earlier runs that didn't populate them), to rescore after a profile change, or to upgrade past Sonnet-scored entries to Opus quality. Updates Why Fits, Key Factors, and Match in place; preserves user-set fields (Match Quality, Status, Feedback Comment, Recycled). Trigger phrases include "jobs-rescore", "re-evaluate tracker", "fix empty rationales", "re-run scoring on tracker", "update rationales".
 version: 1.0.0
 ---
 
@@ -12,23 +12,23 @@ Existing tracker rows have their LLM-derived fields (`Match`, `Why Fits`, `Key F
 - Profile changes (criteria, hard exclusions) don't retroactively re-evaluate already-tracked roles
 - Model upgrades (e.g. Sonnet → Opus) don't lift past entries to higher quality
 
-`re-score` solves all three by selectively re-running the scoring prompt on existing tracker rows and updating in place. Non-destructive — preserves every user-edited column (Match Quality labels, Status changes, Feedback Comments).
+`jobs-rescore` solves all three by selectively re-running the scoring prompt on existing tracker rows and updating in place. Non-destructive — preserves every user-edited column (Match Quality labels, Status changes, Feedback Comments).
 
 ## When NOT to use it
 
-- For NEW jobs from this week's pipeline — that's `run-job-search`'s job; no need to re-run scoring on already-fresh writes.
-- For deleting bad rows — re-score updates; doesn't delete. Use Notion's row-delete UI or extend with `archive` mode if you need it.
+- For NEW jobs from this week's pipeline — that's `jobs-run`'s job; no need to re-run scoring on already-fresh writes.
+- For deleting bad rows — jobs-rescore updates; doesn't delete. Use Notion's row-delete UI or extend with `archive` mode if you need it.
 - For rescoring closed rows — by default skips rows where `Status: Closed` (they're no longer actionable; rescoring wastes tokens). Override with `--include-closed` if you really want to rescore historical entries.
 
 ## Step 0 — Determine deployment mode + load context
 
 Read `state/.setup_complete[deployment_mode]` and `[auth_method]`.
 
-In **cloud mode**: hydrate profile from the AI 50 Profile Notion page to `/tmp/profile.json` (same as run-job-search Pass P-4). The profile MUST have `cv_json` for the v3 scoring path; otherwise abort with: *"re-score requires CV-grounded categorical scoring (cv_json in profile). Run setup again with the CV upload step, or use the legacy structured-rubric scoring path which already runs at create-time and isn't bug-prone."*
+In **cloud mode**: hydrate profile from the AI 50 Profile Notion page to `/tmp/profile.json` (same as jobs-run Pass P-4). The profile MUST have `cv_json` for the v3 scoring path; otherwise abort with: *"jobs-rescore requires CV-grounded categorical scoring (cv_json in profile). Run setup again with the CV upload step, or use the legacy structured-rubric scoring path which already runs at create-time and isn't bug-prone."*
 
 In **local mode**: read `./config/profile.json` directly.
 
-Run `notion-api.py discover` first to refresh `state/cached-ids.json` (defensive — same pattern feedback-recycle uses; per-installation caches drift). Capture the resolved `tracker_database_id`.
+Run `notion-api.py discover` first to refresh `state/cached-ids.json` (defensive — same pattern jobs-recycle-feedback uses; per-installation caches drift). Capture the resolved `tracker_database_id`.
 
 ## Step 1 — Pick scope
 
@@ -163,7 +163,7 @@ Tracker connector: connected (api_token)
 Updated rows visible in Notion: <tracker_url>
 ```
 
-If verdict changes happened, optionally offer to label them for feedback-recycle:
+If verdict changes happened, optionally offer to label them for jobs-recycle-feedback:
 
 > "4 verdict changes — want to walk through them and confirm/dispute each call? (5 min)"
 
@@ -184,11 +184,11 @@ Append a one-line entry to `state/re-score-log.json` (gitignored):
 }
 ```
 
-Useful for tracking re-score history; later versions could surface this as "you've re-scored N times in the last month, last verdict-change rate was X%."
+Useful for tracking jobs-rescore history; later versions could surface this as "you've re-scored N times in the last month, last verdict-change rate was X%."
 
 ## Failure modes
 
-- **No rows match scope**: print "0 rows match — nothing to re-score" and exit cleanly.
+- **No rows match scope**: print "0 rows match — nothing to jobs-rescore" and exit cleanly.
 - **Profile lacks cv_json**: abort cleanly per Step 0.
 - **Notion query fails**: report the API error; don't silently skip the run.
 - **Single-row scoring failure**: log the row's URL + error; continue with the rest. Final summary lists failed rows under "Skipped" with reason.
@@ -201,4 +201,4 @@ Useful for tracking re-score history; later versions could surface this as "you'
 - **Profile change rescore**: changed scoring criteria → run with scope=5 (all rows since installation), see verdict-changes in summary.
 - **Model upgrade**: switched from Sonnet to Opus → run with scope=2 (recent date-bounded), see how many entries shift verdict.
 - **Drift check**: periodic spot-check on Match-bucket consistency.
-- **Pre-feedback-recycle warm-up**: re-score after labeling some entries to see if the revised prompt produces verdicts more aligned with your labels.
+- **Pre-feedback-recycle warm-up**: jobs-rescore after labeling some entries to see if the revised prompt produces verdicts more aligned with your labels.

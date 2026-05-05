@@ -1,5 +1,5 @@
 ---
-name: setup
+name: jobs-setup
 description: >
   First-time setup wizard for the AI 50 Job Search plugin. Guides the user through
   configuring their candidate profile, search preferences, and Notion connector.
@@ -17,7 +17,7 @@ Interactive setup wizard. Collects profile, ranking logic, additional context, a
 
 Check for `./state/.setup_complete`.
 
-If it exists and this skill was **explicitly triggered by the user** (not auto-invoked from run-job-search), print:
+If it exists and this skill was **explicitly triggered by the user** (not auto-invoked from jobs-run), print:
 
 ```
 ✅ Plugin already configured (setup completed on {date from file}).
@@ -29,7 +29,7 @@ To update your connector: edit config/connectors.json directly.
 
 Then stop.
 
-If the sentinel already exists and setup was auto-invoked from run-job-search, skip all steps and return immediately so the search can proceed.
+If the sentinel already exists and setup was auto-invoked from jobs-run, skip all steps and return immediately so the search can proceed.
 
 ---
 
@@ -529,7 +529,7 @@ Agents will read `mcp_tool_prefix` at run time to construct tool names. The orch
 
 ##### 5a.5 — Routines special case
 
-If the user selected "Cloud Routine" deployment mode in Step 1 AND chose `auth_method = "mcp"`: warn that MCP works in Routines (Routine containers can attach connectors) but the per-call error compounding means a meaningful share of scheduled runs will fail partway. The connector UUID seen during local setup may also differ from the one assigned to the Routine container, so the orchestrator's `mcp_tool_prefix` re-probe (in run-job-search) is what actually keeps the run portable. Recommend switching to `auth_method = "api_token"` for any cadence tighter than weekly. Note this in the run logs so the user has the context if Routine runs start failing.
+If the user selected "Cloud Routine" deployment mode in Step 1 AND chose `auth_method = "mcp"`: warn that MCP works in Routines (Routine containers can attach connectors) but the per-call error compounding means a meaningful share of scheduled runs will fail partway. The connector UUID seen during local setup may also differ from the one assigned to the Routine container, so the orchestrator's `mcp_tool_prefix` re-probe (in jobs-run) is what actually keeps the run portable. Recommend switching to `auth_method = "api_token"` for any cadence tighter than weekly. Note this in the run logs so the user has the context if Routine runs start failing.
 
 #### Step 5b — Names + database setup
 
@@ -819,7 +819,7 @@ Print:
 ```
 Got it. You'll run with the AI 50 baseline. After your first run, type
 "extend companies" anytime to add custom-tracked companies via the
-extend-companies skill.
+jobs-extend-companies skill.
 ```
 
 In **cloud mode**: create the Extended Companies List Notion page with body `[]` (empty JSON array in a code block). The page exists so the runtime discovery can find it, but it's empty.
@@ -852,7 +852,7 @@ For each entry:
 
    Ask: *"This company's careers page isn't on a supported ATS. Want me to extract listings with the scrape-extract agent (Claude Code agent, ~Haiku tokens per page), or skip fetching and just remember the URL?"* Default suggestion is **scrape** if the page looks like a typical careers listing; **skip** if it's clearly a single-job blurb or a redirect.
 
-2. **If careers_url not provided** (just a name): ask the user to paste the URL. If they don't have it, store as `{name, ats: "skip", source: "user_added"}` placeholder — they can update later via `extend-companies`.
+2. **If careers_url not provided** (just a name): ask the user to paste the URL. If they don't have it, store as `{name, ats: "skip", source: "user_added"}` placeholder — they can update later via `jobs-extend-companies`.
 
 After processing all entries, show the proposed list and confirm before writing.
 
@@ -907,7 +907,7 @@ Are these correct? (yes / let me adjust)
 
 If user says "let me adjust" — re-ask Q3.5 (or the relevant question) and regenerate the rules. If "yes" — proceed to Step 8.
 
-This is the lightweight version of post-wizard validation. The fuller version (showing 5 sample listings and asking which the user would include/exclude) ships with the recalibrate-scoring skill in v2.5.2.
+This is the lightweight version of post-wizard validation. The fuller version (showing 5 sample listings and asking which the user would include/exclude) ships with the jobs-recalibrate skill in v2.5.2.
 
 ---
 

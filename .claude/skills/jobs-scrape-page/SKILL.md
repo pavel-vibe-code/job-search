@@ -1,5 +1,5 @@
 ---
-name: scrape-page
+name: jobs-scrape-page
 description: Extract structured job listings from any careers-page URL via the scrape-extract agent. Useful for testing extraction quality before adding a company as scrape-tracked, OR for ad-hoc one-off lookups outside the regular pipeline. Trigger phrases: "scrape this page", "extract jobs from this URL", "what's listed at <url>", "test scrape on".
 version: 4.0.0
 ---
@@ -10,14 +10,14 @@ Calls the `scrape-extract` agent (`.claude/agents/scrape-extract.md`) on a singl
 
 ## When to use it
 
-- **Before adding a company as scrape-tracked**: paste the careers URL, see what extraction returns. If quality is good (correct titles, real URLs, reasonable structure), proceed to add via `extend-companies`. If not, the page is probably SPA-only and tracking won't work; add as `ats: skip` instead.
+- **Before adding a company as scrape-tracked**: paste the careers URL, see what extraction returns. If quality is good (correct titles, real URLs, reasonable structure), proceed to add via `jobs-extend-companies`. If not, the page is probably SPA-only and tracking won't work; add as `ats: skip` instead.
 - **Ad-hoc curiosity**: see what's listed at a given careers page right now without committing to track it.
 - **Triaging a tracked-company quality issue**: if a scrape-tracked company is consistently producing weird tracker entries, run this skill on its URL to inspect what extraction is returning vs. what the page actually shows.
 
 ## When NOT to use it
 
-- Recurring tracking — that's `extend-companies` + the regular pipeline. This skill is one-shot.
-- Pages on a supported deterministic ATS (Ashby, Greenhouse, Lever, Comeet, Teamtailor, Homerun) — the deterministic adapters are higher-quality. Just add via `extend-companies` directly; scrape is only the fallback for unsupported ATSes.
+- Recurring tracking — that's `jobs-extend-companies` + the regular pipeline. This skill is one-shot.
+- Pages on a supported deterministic ATS (Ashby, Greenhouse, Lever, Comeet, Teamtailor, Homerun) — the deterministic adapters are higher-quality. Just add via `jobs-extend-companies` directly; scrape is only the fallback for unsupported ATSes.
 
 ## Step 1 — Get the URL
 
@@ -63,7 +63,7 @@ Jobs found: <N>
 
 <If extraction_quality is partial or no_static_content, print the "notes" field
  from the envelope and offer:>
-  - "Add as scrape-tracked anyway" → run extend-companies with this URL
+  - "Add as scrape-tracked anyway" → run jobs-extend-companies with this URL
   - "Add as skip" → record URL but don't fetch
   - "Don't add" → exit
 ```
@@ -79,7 +79,7 @@ Want to add <company> as a scrape-tracked company so it shows up in your
 weekly run? (yes / no)
 ```
 
-On `yes`: hand off to `extend-companies` skill with the URL pre-filled.
+On `yes`: hand off to `jobs-extend-companies` skill with the URL pre-filled.
 On `no`: exit. The user can always come back later.
 
 ## Cost

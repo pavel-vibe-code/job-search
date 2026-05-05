@@ -159,7 +159,7 @@ A Cloud Routine is a sandboxed container that fires on your schedule (e.g. every
 1. **Clones your repo from GitHub.** Whatever's on `main` at fire time gets pulled fresh into a new container. Code changes you push land in the next run automatically; no other "deploy" step.
 2. **Runs your setup script** (§3.2c) which scaffolds `state/.setup_complete` so the orchestrator skips the wizard. Containers don't persist between runs, so this scaffolds fresh state each fire.
 3. **Loads the agent runtime + your environment.** This is when your custom env vars (`NOTION_API_TOKEN`, `NOTION_PARENT_ANCHOR_ID`) and the network egress allowlist become visible. **Setup script does NOT have access to your custom env vars** — it runs in a constrained pre-init context. Don't try to do auth pre-checks or anything that needs your token from inside the setup script.
-4. **Executes the trigger prompt** — runs the `run-job-search` orchestrator skill end-to-end with no human in the loop. Auth failures (wrong token, revoked integration) surface here at the first Notion call.
+4. **Executes the trigger prompt** — runs the `jobs-run` orchestrator skill end-to-end with no human in the loop. Auth failures (wrong token, revoked integration) surface here at the first Notion call.
 5. **Tears down.** Nothing persists outside Notion.
 
 The repo's `.claude/settings.json` (shipped since v2.3.1) supplies the tool-permission allowlist; without it the Routine would silently stall on the first Bash call. You don't have to write or edit it.
@@ -200,7 +200,7 @@ NOTION_PARENT_ANCHOR_ID=<32-char-page-id>
 | `NOTION_API_TOKEN` | Yes | Auth for all Notion calls |
 | `NOTION_PARENT_ANCHOR_ID` | Recommended | Fallback anchor if the parent page goes missing. Without it, the Routine aborts on missing-parent (since there's no human to pick a new anchor). With it, the runtime auto-recreates under the anchor. |
 
-> **No Anthropic API key required.** All LLM work in this plugin runs through Claude Code agents (compile-write for scoring, scrape-extract for unsupported-ATS extraction, notify-hot for digests, feedback-recycle for the learning loop). Agents use Claude as their substrate — billed against your Claude.ai subscription quota. (Earlier internal versions had a direct `api.anthropic.com` call from `fetch-and-diff.py` for the scrape ATS that required `ANTHROPIC_API_KEY`; v1.0.0 reimplements that path as a Claude Code agent so users no longer need to mint or wire a separate API key.)
+> **No Anthropic API key required.** All LLM work in this plugin runs through Claude Code agents (compile-write for scoring, scrape-extract for unsupported-ATS extraction, notify-hot for digests, jobs-recycle-feedback for the learning loop). Agents use Claude as their substrate — billed against your Claude.ai subscription quota. (Earlier internal versions had a direct `api.anthropic.com` call from `fetch-and-diff.py` for the scrape ATS that required `ANTHROPIC_API_KEY`; v1.0.0 reimplements that path as a Claude Code agent so users no longer need to mint or wire a separate API key.)
 
 To find a page ID: open the page in Notion → click **•••** → **Copy link to view**. The 32-character string in the URL is the ID. The hyphenated form (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`) and the un-hyphenated form both work; if one is rejected, try the other.
 
@@ -229,7 +229,7 @@ Wildcards are allowed in the Routine UI's domains field.
 | `*.ashbyhq.com`, `*.greenhouse.io`, `*.lever.co`, `*.comeet.com`, `*.teamtailor.com`, `*.homerun.co` | The 6 supported deterministic ATS APIs. Greenhouse wildcard covers EU subdomain (`job-boards.eu.greenhouse.io`). |
 | `surgehq.ai` | Surge AI baseline (legacy v2.x; rarely hits — fine to leave) |
 
-> **No `api.anthropic.com` in the allowlist.** All LLM work runs through Claude Code agents (Pass 3 compile-write, Pass 5 notify-hot, Pass 6 feedback-recycle, and the scrape-extract agent for any company tagged `ats: scrape`). Agents bill against your Claude.ai subscription — they do not make outbound HTTPS calls to `api.anthropic.com` from inside the container.
+> **No `api.anthropic.com` in the allowlist.** All LLM work runs through Claude Code agents (Pass 3 compile-write, Pass 5 notify-hot, Pass 6 jobs-recycle-feedback, and the scrape-extract agent for any company tagged `ats: scrape`). Agents bill against your Claude.ai subscription — they do not make outbound HTTPS calls to `api.anthropic.com` from inside the container.
 
 #### 3.2c — Setup script
 
@@ -240,7 +240,7 @@ In the **Setup script** field, paste this:
 NOTION_API=$(find / -path '*/scripts/notion-api.py' -type f 2>/dev/null | head -1)
 PLUGIN_ROOT=$(dirname "$(dirname "$NOTION_API")")
 
-# Create the setup sentinel so run-job-search doesn't trigger the wizard
+# Create the setup sentinel so jobs-run doesn't trigger the wizard
 mkdir -p "$PLUGIN_ROOT/state"
 DATE=$(date +%Y-%m-%d)
 printf '{"setup_completed":"%s","method":"routine","deployment_mode":"cloud","auth_method":"api_token"}\n' "$DATE" > "$PLUGIN_ROOT/state/.setup_complete"
@@ -285,7 +285,7 @@ Routine context (no human in the loop):
 - Do not ask any interactive questions. If something is ambiguous, pick the
   documented default. If genuinely blocked, fail loudly and exit non-zero.
 
-Then execute the run-job-search skill end-to-end and print the canonical run summary.
+Then execute the jobs-run skill end-to-end and print the canonical run summary.
 ```
 
 ### 3.4 — Test-fire the Routine
@@ -316,9 +316,9 @@ The Routine fires on its schedule with no further action needed. Things to do pe
 - **Rotate the Notion token** every few months. Mint a new one, paste it into the Routine environment, revoke the old one at notion.so/profile/integrations.
 - **Review the tracker**. New rows have `Status = "New"`. Update to `Reviewed / Applied / Not interested` as you triage.
 - **Tune scoring** by editing the AI 50 Profile Notion page. For CV-grounded categorical scoring (default) edit the `criteria` array and re-run; for legacy structured rubric, increase/decrease weights as needed. To override the model used for scoring, set `profile.scoring.model: "claude-sonnet-4-6"` (cuts subscription quota use ~75%; quality drop is usually small for clear-fit candidates).
-- **Extend the company list** with the `extend-companies` skill — type `extend companies` in Claude Code and use the dialogue-based flow to add (paste careers URL → ATS auto-detected), remove, update, list, or clean up `ats: skip` entries. No JSON editing required.
-- **Preview a careers page** with the `scrape-page` skill — type `scrape this page: <url>` to test extraction quality before committing to track a company on a custom careers page.
-- **Recycle feedback weekly.** After labeling tracker rows with Match Quality + Feedback Comment, the next Routine run auto-triggers `feedback-recycle` (gated to once per 7 days) which folds your labels into next week's scoring prompt. To trigger manually, type `recycle feedback`.
+- **Extend the company list** with the `jobs-extend-companies` skill — type `extend companies` in Claude Code and use the dialogue-based flow to add (paste careers URL → ATS auto-detected), remove, update, list, or clean up `ats: skip` entries. No JSON editing required.
+- **Preview a careers page** with the `jobs-scrape-page` skill — type `scrape this page: <url>` to test extraction quality before committing to track a company on a custom careers page.
+- **Recycle feedback weekly.** After labeling tracker rows with Match Quality + Feedback Comment, the next Routine run auto-triggers `jobs-recycle-feedback` (gated to once per 7 days) which folds your labels into next week's scoring prompt. To trigger manually, type `recycle feedback`.
 
 ---
 

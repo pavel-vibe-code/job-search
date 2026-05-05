@@ -101,7 +101,7 @@ Before aborting on a Notion-create failure, write a JSON file the orchestrator c
 ## Step 1 — Read inputs
 
 The orchestrator passes the following into your prompt:
-- **Hot-list parent page ID** (resolved by run-job-search Step P-3 from `state/cached-ids.json`)
+- **Hot-list parent page ID** (resolved by jobs-run Step P-3 from `state/cached-ids.json`)
 - **Newly-written jobs** — `/tmp/newly-written.json`
 - **Static notifications + external companies** — from Pass 1
 - **Profile path** — `/tmp/profile.json` (cloud) or `./config/profile.json` (local)

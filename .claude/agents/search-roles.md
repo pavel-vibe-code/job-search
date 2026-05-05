@@ -2,7 +2,7 @@
 name: search-roles
 description: >
   Use this agent to fetch new job listings across all configured companies and
-  compute the diff against the last known state. Called by the run-job-search
+  compute the diff against the last known state. Called by the jobs-run
   orchestrator at the start of each pipeline run. Returns only new job additions
   (not previously seen) and removed job IDs (listings that have disappeared).
 

@@ -27,7 +27,7 @@ This agent intentionally does NOT declare a `tools:` allowlist in its frontmatte
 
 ### `notion_call` — the dispatch abstraction
 
-`auth_method` MUST be passed explicitly by the orchestrator in the prompt (see run-job-search SKILL.md Pass 3 inputs). Do **not** read it from `connectors.json[notion.auth_method]` — that field may be `null` in a Routine cold-start (shipped template value). If `auth_method` is absent from the prompt, abort and ask the orchestrator to re-invoke with it set. There are two transports; both expose the same conceptual operations.
+`auth_method` MUST be passed explicitly by the orchestrator in the prompt (see jobs-run SKILL.md Pass 3 inputs). Do **not** read it from `connectors.json[notion.auth_method]` — that field may be `null` in a Routine cold-start (shipped template value). If `auth_method` is absent from the prompt, abort and ask the orchestrator to re-invoke with it set. There are two transports; both expose the same conceptual operations.
 
 **If `auth_method == "mcp"`:**
 
@@ -118,7 +118,7 @@ Fields:
 ## Step 1 — Read inputs
 
 The orchestrator passes the following into your prompt:
-- **Tracker DB ID** (resolved by run-job-search Step P-3 from `state/cached-ids.json`)
+- **Tracker DB ID** (resolved by jobs-run Step P-3 from `state/cached-ids.json`)
 - **Profile path** — `/tmp/profile.json` (cloud mode) or `./config/profile.json` (local mode)
 - **Connectors path** — `./config/connectors.json` (read auth_method + mcp_tool_prefix)
 - **Candidates file** — `/tmp/pass3-input.json`. Schema (v2.5.2+):
@@ -373,8 +373,8 @@ These are NOT optional. A v3 write that populates `Why Fits` but leaves `Key Fac
 
 **Eligibility for write:**
 - v3 path: by default, write candidates with `verdict in ("High", "Mid")` — Low entries are dropped (don't bloat tracker with rejections; they're documented in run summary count).
-  - **Override:** if `profile.scoring.show_low == true`, also write Low entries (with `Match: "Low"`). This is opt-in for power users who want to see all decisions in their tracker (useful for feedback-recycle training: labeling Low entries that should have been Mid trains the scoring prompt). Default is `false` (omit Low writes).
-  - User can also disagree retroactively by labeling Low entries via the Match Quality column — see v3.0.0 feedback-recycle.
+  - **Override:** if `profile.scoring.show_low == true`, also write Low entries (with `Match: "Low"`). This is opt-in for power users who want to see all decisions in their tracker (useful for jobs-recycle-feedback training: labeling Low entries that should have been Mid trains the scoring prompt). Default is `false` (omit Low writes).
+  - User can also disagree retroactively by labeling Low entries via the Match Quality column — see v3.0.0 jobs-recycle-feedback.
 - Legacy path: write jobs scoring ≥ `profile.json[scoring.minimum_score]`.
 
 Query existing rows in the **tracker DB ID passed inline by the orchestrator** (NOT from connectors.json — that field doesn't exist in v2.3+; see Step 1) to collect known URLs. Skip any candidate whose URL is already present. Use `query-database` (api_token mode) or `notion-search` against the data source (mcp mode).
@@ -487,7 +487,7 @@ Return an envelope with both the newly-written jobs AND the token usage from thi
 }
 ```
 
-`usage` accumulates across all N candidate scoring calls in this pass. The orchestrator aggregates across passes (compile-write + notify-hot + recalibrate-scoring + feedback-recycle when invoked) and prints a single token+cost block in the run summary.
+`usage` accumulates across all N candidate scoring calls in this pass. The orchestrator aggregates across passes (compile-write + notify-hot + jobs-recalibrate + jobs-recycle-feedback when invoked) and prints a single token+cost block in the run summary.
 
 For backward compat with pre-v3.0.5 orchestrators that expect just an array, ALSO accept that shape — orchestrator should handle both: if the response is an array, treat as `newly_written_jobs` with `usage: null`. Modern orchestrators get the envelope.
 

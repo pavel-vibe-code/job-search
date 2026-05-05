@@ -15,7 +15,7 @@ Every Monday at 08:00:
 
 You wake up Monday with 0–10 new candidates pre-vetted. No more manually trawling 50+ careers pages.
 
-**What v1.0 ships with** (after iteration through internal v2.x → v4.x): CV-grounded LLM-judged categorical scoring (High / Mid / Low buckets, not numeric rubric); 6 deterministic ATS adapters (Ashby, Greenhouse incl. EU subdomain, Lever, Comeet, Teamtailor, Homerun) plus a Claude Code agent–based scrape fallback for any HTML careers page (no API key required); Notion-feedback learning loop that improves scoring week-over-week from your tracker labels; `extend-companies` skill for dialogue-based add/remove/update of custom-tracked companies on top of the AI 50 baseline (no JSON editing); `scrape-page` skill for ad-hoc extraction-quality testing; per-run token + cost tracking against your Claude.ai subscription quota. See [CHANGELOG.md](CHANGELOG.md) for the full development trail.
+**What v1.0 ships with** (after iteration through internal v2.x → v4.x): CV-grounded LLM-judged categorical scoring (High / Mid / Low buckets, not numeric rubric); 6 deterministic ATS adapters (Ashby, Greenhouse incl. EU subdomain, Lever, Comeet, Teamtailor, Homerun) plus a Claude Code agent–based scrape fallback for any HTML careers page (no API key required); Notion-feedback learning loop that improves scoring week-over-week from your tracker labels; `jobs-extend-companies` skill for dialogue-based add/remove/update of custom-tracked companies on top of the AI 50 baseline (no JSON editing); `jobs-scrape-page` skill for ad-hoc extraction-quality testing; per-run token + cost tracking against your Claude.ai subscription quota. See [CHANGELOG.md](CHANGELOG.md) for the full development trail.
 
 ---
 
@@ -48,7 +48,7 @@ The pipeline has six passes per run:
 | 3 | `compile-write` agent | Applies typed hard exclusions (language, location, custom rules), scores survivors with LLM-judged High/Mid/Low against your CV + criteria, writes qualifying rows to your Tracker DB |
 | 4 | (orchestrator) | Persists the run's job-ID state to the State DB so next week's diff works |
 | 5 | `notify-hot` agent | Creates a dated digest page with the current run's High-bucket matches (skips the page if there's nothing hot to report) |
-| 6 | `feedback-recycle` skill | Auto-triggers if 7+ days since last cycle: reads your tracker labels (Match Quality, Feedback Comment), derives anti-patterns + few-shot examples, feeds them into next run's scoring prompt |
+| 6 | `jobs-recycle-feedback` skill | Auto-triggers if 7+ days since last cycle: reads your tracker labels (Match Quality, Feedback Comment), derives anti-patterns + few-shot examples, feeds them into next run's scoring prompt |
 
 Total runtime per fire: 60–90 seconds for ~50 companies plus a few seconds per scrape-tracked company. **Cost** runs against your Claude.ai subscription quota (the agents use Claude as their substrate — no Anthropic API key needed). For users who run Claude Code via direct API key auth instead of Claude.ai login, the equivalent pay-per-token cost is roughly **$20–50 per run on Opus default, $5–15 on Sonnet** (override via `profile.scoring.model`).
 
@@ -70,7 +70,7 @@ Total runtime per fire: 60–90 seconds for ~50 companies plus a few seconds per
 └── 📄 Extended Companies List           ← companies you track on top of AI 50
 ```
 
-To tune scoring criteria or change role types, edit the **AI 50 Profile** Notion page directly (changes apply on next run). To add/remove/update custom companies on top of the AI 50 baseline, run the `extend-companies` skill (dialogue-based, no JSON editing). To preview extraction quality on a careers page before adding it as scrape-tracked, run `scrape-page`.
+To tune scoring criteria or change role types, edit the **AI 50 Profile** Notion page directly (changes apply on next run). To add/remove/update custom companies on top of the AI 50 baseline, run the `jobs-extend-companies` skill (dialogue-based, no JSON editing). To preview extraction quality on a careers page before adding it as scrape-tracked, run `jobs-scrape-page`.
 
 ---
 
@@ -107,7 +107,7 @@ v1.0.0 — first public release. Runs reliably as a weekly Cloud Routine. Tested
 Known limitations:
 - `removed_jobs_pending` (closures the agent didn't reach mid-failure) currently relies on next run's diff to re-surface; rare edge case can lose a closure.
 - Cloud Routine env vars are visible to anyone with edit access on the routine — rotate the Notion token periodically if you share access.
-- `scrape` ATS (Claude Code agent extraction of HTML careers pages) only works on pages that serve meaningful HTML to non-JS clients; pure SPAs return an empty shell and the agent returns `extraction_quality: no_static_content`. Use the `scrape-page` skill to test extraction quality on a careers page before committing to track it.
+- `scrape` ATS (Claude Code agent extraction of HTML careers pages) only works on pages that serve meaningful HTML to non-JS clients; pure SPAs return an empty shell and the agent returns `extraction_quality: no_static_content`. Use the `jobs-scrape-page` skill to test extraction quality on a careers page before committing to track it.
 - Default scoring uses Claude Opus 4.7 with extended thinking — premium quality. Cost runs against your Claude.ai subscription quota (Pro: meaningful chunk of weekly cap; Max: comfortable headroom). To cut quota use ~75% with a small quality drop, set `profile.scoring.model: "claude-sonnet-4-6"` in your AI 50 Profile page.
 
 ---
@@ -125,7 +125,7 @@ That's it. No `pip install`, no Anthropic API key required (the LLM work runs on
 ## Contributing
 
 Issues and PRs welcome. The most useful contributions tend to be:
-- Adding companies to `config/companies.json` (the curated AI 50 baseline shipped with the plugin) — especially when their ATS slug changes. End-users add personal companies via the `extend-companies` skill, not by editing companies.json.
+- Adding companies to `config/companies.json` (the curated AI 50 baseline shipped with the plugin) — especially when their ATS slug changes. End-users add personal companies via the `jobs-extend-companies` skill, not by editing companies.json.
 - Adding ATS adapters to `scripts/ats_adapters.py` (the registry pattern — one new entry per ATS, plus a fetcher in `fetch-and-diff.py` and a normaliser)
 - Adding region keywords to `scripts/fetch-and-diff.py` for personas in regions the current keyword list under-represents
 - Adding persona-scenario tests to `tests/test_personas.py` if you find a candidate archetype the current filter doesn't handle well

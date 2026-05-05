@@ -1,5 +1,5 @@
 ---
-name: feedback-recycle
+name: jobs-recycle-feedback
 description: Reads recent user feedback labels in the Notion tracker (Match Quality + Feedback Comment columns), synthesizes anti-patterns and few-shot examples from disagreements between LLM verdict (Match) and user verdict (Match Quality), and updates the profile so future Pass 3 LLM scoring runs incorporate the learning. Closes the v3.0 learning loop. Invoke explicitly via "recycle feedback" or "update profile from labels", or run automatically at end of each cloud Routine fire (when v3.0.0 orchestrator integration ships).
 version: 3.0.0
 ---
@@ -138,7 +138,7 @@ This prevents double-counting in future recycle runs.
 }
 ```
 
-This file gates the orchestrator's optional Pass 6 auto-trigger (run-job-search SKILL.md): Pass 6 fires only if last_recycle is missing or > 7 days old. Without this stamp, every Routine fire would invoke recycle even when there's nothing new — wasteful.
+This file gates the orchestrator's optional Pass 6 auto-trigger (jobs-run SKILL.md): Pass 6 fires only if last_recycle is missing or > 7 days old. Without this stamp, every Routine fire would invoke recycle even when there's nothing new — wasteful.
 
 File is gitignored (per-installation; `state/` directory is already in .gitignore).
 
@@ -173,7 +173,7 @@ Token usage:  {input_tokens} input ({cache_read} cached), {output} output
               model: {model_id}, est. cost: ${X.XX}
 ```
 
-If invoked from run-job-search Pass 6, return the usage in an envelope so the orchestrator's aggregate token block reflects feedback-recycle's contribution:
+If invoked from jobs-run Pass 6, return the usage in an envelope so the orchestrator's aggregate token block reflects jobs-recycle-feedback's contribution:
 
 ```json
 {
@@ -190,7 +190,7 @@ If invoked from run-job-search Pass 6, return the usage in an envelope so the or
 }
 ```
 
-If invoked manually, suggest *"Run feedback-recycle again after your next routine fire to compound the learning. The more labels you provide, the better the signal."*
+If invoked manually, suggest *"Run jobs-recycle-feedback again after your next routine fire to compound the learning. The more labels you provide, the better the signal."*
 
 If invoked automatically (cloud Routine Pass 6), just log the recycle and continue.
 
@@ -198,7 +198,7 @@ If invoked automatically (cloud Routine Pass 6), just log the recycle and contin
 
 ## Auto-trigger integration (v3.0.0+)
 
-When the orchestrator's run-job-search skill finishes Pass 5, it can optionally invoke this skill to recycle any new labels before the next fire. Implementation: add `Pass 6 — feedback-recycle (optional)` to the orchestrator. Gate it on:
+When the orchestrator's jobs-run skill finishes Pass 5, it can optionally invoke this skill to recycle any new labels before the next fire. Implementation: add `Pass 6 — jobs-recycle-feedback (optional)` to the orchestrator. Gate it on:
 - `state/.setup_complete[deployment_mode] == "cloud"` (cloud-only — local users invoke manually when ready)
 - `state/last_recycle.json` shows ≥7 days since last cycle (don't recycle every fire — gives user time to label new entries)
 
@@ -212,4 +212,4 @@ Manual invocation always works regardless of the auto-trigger gate.
 - v3.2: confidence calibration — if LLM consistently emits `confidence: high` on entries the user labels Bad, prompt-tune to reduce confidence on similar patterns.
 - post-v1.0 backlog: cross-user shared anti-pattern store (opt-in, anonymous) — community-level learning of what doesn't work.
 
-These are speculative future work; v3.0.0 ships only the within-single-user feedback-recycle described in Steps 1-5.
+These are speculative future work; v3.0.0 ships only the within-single-user jobs-recycle-feedback described in Steps 1-5.

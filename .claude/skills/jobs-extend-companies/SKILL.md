@@ -1,5 +1,5 @@
 ---
-name: extend-companies
+name: jobs-extend-companies
 description: Add, remove, or update companies on top of the AI 50 baseline — interactive dialogue, no JSON editing. Auto-detects ATS from pasted careers-page URLs via the ats_adapters registry. Supports bulk-paste of URLs (all-at-once add) and inline editing. Persists changes to Notion (cloud mode) or config/custom-companies.json (local mode). Invoke when the user says "extend companies", "add company", "add custom company", "remove company", "change tracked companies", "edit my companies list", "manage companies", or similar phrasing.
 version: 4.0.0
 ---
@@ -32,7 +32,7 @@ Read `state/.setup_complete[deployment_mode]`:
 - `"local"` — custom companies live in `./config/custom-companies.json` (gitignored). Source-of-truth.
 
 Look up the page ID:
-1. **Run `notion-api.py discover`** first to refresh `state/cached-ids.json` (defensive — same as feedback-recycle Step 1; per-installation caches drift).
+1. **Run `notion-api.py discover`** first to refresh `state/cached-ids.json` (defensive — same as jobs-recycle-feedback Step 1; per-installation caches drift).
 2. Read `state/cached-ids.json[extended_companies_page_id]`.
 
 Load the current custom-companies array. Cloud: `notion-api.py fetch-page-body --page-id <extended_companies_page_id>` and parse the JSON code block. Local: `json.load(open('./config/custom-companies.json'))`.
@@ -234,7 +234,7 @@ The next Routine fire (or local "run the job search") will use the updated list.
 
 ## Step 5 — Suggest follow-ups
 
-If the user added scrape entries: suggest watching the next Routine fire's tracker output to confirm the LLM extraction quality is acceptable; iterate via this skill if not. Or run the `scrape-page` skill on the URL first to preview extraction quality before committing to add it.
+If the user added scrape entries: suggest watching the next Routine fire's tracker output to confirm the LLM extraction quality is acceptable; iterate via this skill if not. Or run the `jobs-scrape-page` skill on the URL first to preview extraction quality before committing to add it.
 
 If they cleaned up many skip entries: print *"Want to recycle feedback after your next fire? The newly-tracked companies' jobs will surface in the tracker — labeling a few will train the LLM scoring on this expanded pattern set."*
 

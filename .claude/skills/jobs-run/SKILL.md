@@ -1,5 +1,5 @@
 ---
-name: run-job-search
+name: jobs-run
 description: >
   This skill should be used when the user wants to run the AI 50 job search,
   find new job openings, scan for roles, update the job tracker, or check what's
@@ -32,7 +32,7 @@ If it does **not** exist, this is a first run. Print:
 Welcome to AI 50 Job Search! Before the first search, we need to configure your profile.
 ```
 
-Immediately execute the full setup wizard at `./skills/setup/SKILL.md`. The wizard handles deployment-mode choice, profile collection, scoring, Notion auth, and creates the sentinel + cached-ids.json on completion.
+Immediately execute the full setup wizard at `./.claude/skills/jobs-setup/SKILL.md`. The wizard handles deployment-mode choice, profile collection, scoring, Notion auth, and creates the sentinel + cached-ids.json on completion.
 
 If setup is abandoned mid-way (no sentinel created), stop and tell the user: *"Setup incomplete. Type 'run the job search' to try again, or 'run onboarding' to launch the wizard directly."*
 
@@ -379,7 +379,7 @@ Mismatch = silent truncation; abort the run with a clear error citing the failin
 **Else (local file backend):**
 - Copy `/tmp/ai50-state.json` back to `./state/companies.json`.
 
-Note: profile and custom-companies are **read-only** during a run, even in cloud mode. The user updates them by editing the Notion pages directly between runs (or via the `extend-companies` skill). Do not write profile / custom-companies back to Notion in any pass.
+Note: profile and custom-companies are **read-only** during a run, even in cloud mode. The user updates them by editing the Notion pages directly between runs (or via the `jobs-extend-companies` skill). Do not write profile / custom-companies back to Notion in any pass.
 
 ### Pass 5 — Hot List (notify-hot agent)
 
@@ -413,7 +413,7 @@ The fallback writes preserve everything the user would have read in Notion; the 
 
 ### Pass 6 — Feedback recycle (optional, v3.0.3+)
 
-After Pass 5 completes successfully, optionally invoke the **feedback-recycle skill** to process any user-labeled tracker entries (Match Quality + Feedback Comment) since the last cycle. This converts disagreements between LLM verdict and user verdict into anti-patterns + few-shot examples that improve subsequent Pass 3 scoring runs.
+After Pass 5 completes successfully, optionally invoke the **jobs-recycle-feedback skill** to process any user-labeled tracker entries (Match Quality + Feedback Comment) since the last cycle. This converts disagreements between LLM verdict and user verdict into anti-patterns + few-shot examples that improve subsequent Pass 3 scoring runs.
 
 **Gating logic:**
 
@@ -427,11 +427,11 @@ should_recycle = (
 ```
 
 State tracking:
-- `./state/last_recycle.json` is written by feedback-recycle on every successful run with a timestamp.
+- `./state/last_recycle.json` is written by jobs-recycle-feedback on every successful run with a timestamp.
 - Pass 6 reads this file. Missing or older than 7 days → trigger.
 - File is gitignored (per-installation, like cached-ids.json).
 
-If gating allows: invoke feedback-recycle skill. The skill self-handles "no new labels" gracefully (prints message and exits without writes), so Pass 6 invocation is safe even when there's nothing to do.
+If gating allows: invoke jobs-recycle-feedback skill. The skill self-handles "no new labels" gracefully (prints message and exits without writes), so Pass 6 invocation is safe even when there's nothing to do.
 
 If gating blocks: skip silently. The user can always invoke `recycle feedback` manually when they have new labels.
 
@@ -459,7 +459,7 @@ Tracker connector: {connected / fallback}
 ━━━ Token usage ━━━
 Pass 3 (compile-write):     {input}K input ({cache_read}K cached), {output}K output  | model: {model}{ + thinking budget}
 Pass 5 (notify-hot):        {input}K input, {output}K output                            | model: {model}
-Pass 6 (feedback-recycle):  {input}K input, {output}K output                            | model: {model}
+Pass 6 (jobs-recycle-feedback):  {input}K input, {output}K output                            | model: {model}
                             (or "skipped — gate not met: last cycle {N} days ago")
 ─────
 Total:    {total_input}K input ({total_cache_read}K cached), {total_output}K output
@@ -481,7 +481,7 @@ If zero qualifying roles this run, say so explicitly. Don't pad.
 
 ### Token + cost aggregation (v3.0.5+)
 
-The orchestrator collects `usage` objects from each pass's response envelope (compile-write returns it after Pass 3; notify-hot after Pass 5; feedback-recycle after Pass 6 if invoked). Aggregate the totals; compute estimated cost using Anthropic's published rates:
+The orchestrator collects `usage` objects from each pass's response envelope (compile-write returns it after Pass 3; notify-hot after Pass 5; jobs-recycle-feedback after Pass 6 if invoked). Aggregate the totals; compute estimated cost using Anthropic's published rates:
 
 | Model | Input ($/Mtok) | Output ($/Mtok) | Cache read ($/Mtok) |
 |---|---|---|---|
@@ -519,7 +519,7 @@ Routine context (no human in the loop):
 - Do not ask any interactive questions. If something is ambiguous, pick the
   documented default. If genuinely blocked, fail loudly and exit non-zero.
 
-Then execute the run-job-search skill end-to-end and print the canonical run summary.
+Then execute the jobs-run skill end-to-end and print the canonical run summary.
 ```
 
 **State DB requirement:** the State DB MUST exist (created by setup, name from `connectors.json[notion.names.state_db]`). Without it, a Routine starts from empty state on every cold start and re-writes every job as new. The Step P-3 discover flow recreates an empty State DB shell if missing — but on first miss the run produces a "no removed jobs" report and over-reports new jobs. Set up properly the first time and you won't see this.
