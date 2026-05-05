@@ -401,7 +401,7 @@ The wizard's free-text background answer (stored as `profile.context`) serves as
 
 **Default model:** Claude Opus with extended thinking enabled (`{type: "enabled", budget_tokens: 4000}`). Opus is meaningfully stronger at multi-criteria evaluation and JD-decomposition than Sonnet/Haiku. Users who prefer cost over quality can override via `profile.scoring.instructions: "use sonnet for cost"` (or `"use haiku"`).
 
-**Cost framing:** ~$20–50/run on Opus with extended thinking (typical run, ~200 candidates surviving hard exclusions). ~$5–15/run if overridden to Sonnet. ~$1–2/run on Haiku, with degraded rationale quality. Anthropic prompt caching is mandatory for the constant profile section — N-1 cache hits per run amortize the per-call cost. Run summary prints aggregate token usage + cost estimate per pass.
+**Cost framing:** per pipeline run on Opus with extended thinking (typical run, ~50–200 candidates surviving hard exclusions): roughly **500K–1.5M tokens** total. Sonnet override: ~250K–700K tokens. Haiku: ~100K–300K tokens, with degraded rationale quality. Anthropic prompt caching is mandatory for the constant profile section (~8K of profile + cv_json + few-shot examples) — N-1 cache hits per run keep marginal-call cost low. Run summary prints aggregate token usage per pass.
 
 ### 7.3 Feedback-recycle learning loop (Pass 6)
 

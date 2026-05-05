@@ -50,7 +50,7 @@ The pipeline has six passes per run:
 | 5 | `notify-hot` agent | Creates a dated digest page with the current run's High-bucket matches (skips the page if there's nothing hot to report) |
 | 6 | `jobs-recycle-feedback` skill | Auto-triggers if 7+ days since last cycle: reads your tracker labels (Match Quality, Feedback Comment), derives anti-patterns + few-shot examples, feeds them into next run's scoring prompt |
 
-Total runtime per fire: 60–90 seconds for ~50 companies plus a few seconds per scrape-tracked company. **Cost** runs against your Claude.ai subscription quota (the agents use Claude as their substrate — no Anthropic API key needed). For users who run Claude Code via direct API key auth instead of Claude.ai login, the equivalent pay-per-token cost is roughly **$20–50 per run on Opus default, $5–15 on Sonnet** (override via `profile.scoring.model`).
+Total runtime per fire: 60–90 seconds for ~50 companies plus a few seconds per scrape-tracked company. **Cost** runs against your Claude.ai subscription quota (the agents use Claude as their substrate — no Anthropic API key needed). Per pipeline run: roughly **500K–1M tokens on Opus default**, ~250K–500K on Sonnet (override via `profile.scoring.model`).
 
 ---
 

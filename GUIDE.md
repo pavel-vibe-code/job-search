@@ -238,7 +238,7 @@ re-score
 - Skill re-runs scoring on every empty-rationale row
 - Updates Why Fits + Key Factors in place; preserves your labels
 
-Cost: ~$2–3 on Sonnet for ~40 rows; ~$8–15 on Opus. Counts against subscription quota for Claude.ai users.
+Cost: roughly ~150K–300K tokens on Sonnet for ~40 rows; ~400K–800K on Opus. Counts against your Claude.ai subscription quota.
 
 ### How to show Low-bucket entries
 
@@ -379,9 +379,9 @@ The plugin runs on **Claude as the LLM substrate** — billed against your Claud
 | Pass 6 feedback-recycle | ~10K input + 2K output, Sonnet — small (auto-fires weekly) |
 
 **Total per run:**
-- Opus default: equivalent to ~$20–50 in pay-per-token API rates
-- Sonnet override (`profile.scoring.model: "claude-sonnet-4-6"`): ~$5–15 equivalent
-- Haiku override: ~$1–3 equivalent (lower quality on borderline calls)
+- Opus default: ~500K–1M tokens
+- Sonnet override (`profile.scoring.model: "claude-sonnet-4-6"`): ~250K–500K tokens
+- Haiku override: ~100K–250K tokens (lower quality on borderline calls)
 
 **Your subscription's perspective:**
 - **Pro plan** (5-hour rolling window): each pipeline run is a meaningful chunk of the cap. If you're firing weekly via a Cloud Routine and also using Claude Code for daily work, expect to feel quota pressure. Loosen by switching to Sonnet for scoring (see below).
