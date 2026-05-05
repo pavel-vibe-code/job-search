@@ -31,7 +31,7 @@ Print a one-line summary:
 ```
 ━━━ AI 50 Job Search — settings ━━━
 Profile: {current_location} · {N} role types · {auth_method} · {deployment_mode}
-{If cv_json present:} CV-grounded scoring (v3 path) | {else:} structured-rubric scoring (legacy)
+CV-grounded categorical scoring (Match: High / Mid / Low) — `cv_json` present
 ```
 
 ## Step 1 — Top-level category menu
@@ -45,7 +45,7 @@ What would you like to change?
   2. Role types          — what jobs to surface (titles, keywords, descriptions)
   3. Location rules      — work mode, regions, country/city exclusions
   4. Hard exclusions     — typed filter rules (language fluency, location locks, custom rules)
-  5. Scoring             — model choice, show_low, instructions, criteria (legacy rubric)
+  5. Scoring             — model choice, show_low, instructions
   6. CV / context        — re-upload CV, edit narrative context paragraph
   7. Show full profile JSON  — read-only view, with copy-to-clipboard option
   8. Edit raw JSON       — power-user override; pastes full new profile (validates first)
@@ -170,16 +170,10 @@ Validate canonical values (country names, language names, seniority labels).
 
 ```
 Scoring settings:
-  • model:        claude-opus-4-7  (default; ~$20-50/run on subscription quota equiv.)
+  • model:        claude-opus-4-7  (default; ~$20-50 per pipeline run equivalent)
                   options: claude-opus-4-7, claude-sonnet-4-6, claude-haiku-4-5-20251001
   • show_low:     false  (Low entries dropped from tracker by default)
   • instructions: "cap non-Prague EU at Mid"  (free-form hint to scoring prompt)
-
-  Legacy rubric (only used if cv_json absent):
-  • minimum_score:     6
-  • hot_score_threshold: 7.5
-  • criteria:          {N entries — drill-down to view/edit}
-  • bonuses:           {N entries}
 
 Pick a field to edit, or 'back'.
 ```
@@ -189,8 +183,6 @@ Pick a field to edit, or 'back'.
 - `model` — show options, ask user to pick. Store the canonical model ID. Offer cost framing: "Opus is ~5× more expensive than Sonnet; Haiku is cheap but lower quality. Most users stick with Opus."
 - `show_low` — toggle bool. Show effect: *"When true: every candidate's verdict (including Low) is written to your tracker, with Match: Low. When false: Low entries are dropped from tracker but counted in the run summary. Default false."*
 - `instructions` — free-form edit. Show current as preview. Note: this gets injected into the scoring prompt; keep concise (1-2 sentences).
-- `minimum_score`, `hot_score_threshold` — numeric edit (legacy rubric only; these don't apply to v3 path).
-- `criteria` / `bonuses` — drill-down per entry; each has weight, label, priority, description, rationale. Same UI as Identity drill-down.
 
 ### Step 2f — CV / context
 
@@ -203,12 +195,12 @@ CV / context:
 
   • cv_json: present (parsed from CV upload during setup)
     summary: 6 work experiences, 3 education entries, ~40 skills extracted.
-    Options: re-upload CV (PDF or text), view current cv_json, remove cv_json (drops to legacy rubric path).
+    Options: re-upload CV (PDF or text), view current cv_json.
 ```
 
 **Re-upload CV**: ask the user to drop a file path or paste text. Send to the same parsing pipeline used in setup Step 3.5; show the extracted JSON for confirmation; replace `cv_json`.
 
-**Remove cv_json**: confirm with user — *"This drops you back to legacy structured-rubric scoring. Your existing scoring.criteria + bonuses will be used. Confirm? (yes / cancel)"*. If yes, delete the cv_json key. Update _v3_note in profile if any.
+**Note**: cv_json cannot be removed via this skill — the scoring system requires it. To replace your CV, use re-upload. To start over with a different profile, run `jobs-setup`.
 
 ### Step 2g — Show full profile JSON
 
@@ -286,9 +278,6 @@ If user changed identity / location / role types:
 
 If user changed hard_exclusions:
 - Note: these only apply to NEW candidates in future runs; existing tracker rows are not retroactively filtered. To retroactively check: run `re-score` (it re-applies hard exclusions).
-
-If user removed cv_json:
-- Strong warning: "Your scoring path drops back to legacy structured-rubric, which only uses Why Fits + Score (no Match buckets, no Key Factors). Existing tracker rows from the v3 path keep their Match values; new rows use legacy. Confirm this is what you want."
 
 ## Failure modes
 

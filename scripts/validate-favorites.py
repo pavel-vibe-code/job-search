@@ -5,8 +5,8 @@ validate-favorites.py — slug-variant probing fallback for the setup wizard.
 Tests every entry in custom-companies.json against its configured ATS JSON API
 endpoint. For entries that return 404, tries common slug variants across the
 three platforms it knows about (ashby / greenhouse / lever). Outputs a JSON
-report to stdout. The filename retains "favorites" for git-history continuity;
-the underlying data store moved to custom-companies.json in v4.0.0.
+report to stdout. (Filename retained for git-history continuity; the data
+store is custom-companies.json.)
 
 Usage:
     python3 validate-favorites.py [--plugin-root /path/to/plugin]
@@ -25,13 +25,7 @@ if "--plugin-root" in sys.argv:
     idx = sys.argv.index("--plugin-root")
     PLUGIN_ROOT = sys.argv[idx + 1]
 
-# v4.0.0: file renamed favorites.json → custom-companies.json. Legacy filename
-# accepted as fallback so in-place upgrades from pre-v4.0.0 don't break.
 CUSTOM_COMPANIES_FILE = os.path.join(PLUGIN_ROOT, "config", "custom-companies.json")
-if not os.path.exists(CUSTOM_COMPANIES_FILE):
-    _legacy = os.path.join(PLUGIN_ROOT, "config", "favorites.json")
-    if os.path.exists(_legacy):
-        CUSTOM_COMPANIES_FILE = _legacy
 
 # Load shared ATS registry — single source of truth for URL→ATS detection.
 # Same loader pattern as validate-jobs.py (the dash in script filenames
@@ -197,7 +191,7 @@ def validate_entry(entry: dict) -> dict:
 
 def main():
     if not os.path.exists(CUSTOM_COMPANIES_FILE):
-        print(json.dumps({"error": f"custom-companies.json not found at {CUSTOM_COMPANIES_FILE} (also tried legacy favorites.json)"}))
+        print(json.dumps({"error": f"custom-companies.json not found at {CUSTOM_COMPANIES_FILE}"}))
         sys.exit(1)
 
     with open(CUSTOM_COMPANIES_FILE) as f:

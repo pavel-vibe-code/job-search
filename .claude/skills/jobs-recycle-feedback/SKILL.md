@@ -32,7 +32,7 @@ Inputs:
     --cache-file ./state/cached-ids.json
   ```
 
-  This ensures cached-ids reflects what's actually in the user's Notion workspace right now. Pre-v3.0.3 versions of this skill skipped this step and queried whatever ID happened to be cached — surfacing as "stale tracker ID, missing labels" errors when DBs had been recreated or migrated.
+  This ensures cached-ids reflects the current state of the Notion workspace. Skipping this step risks "stale tracker ID, missing labels" errors when DBs have been recreated or migrated.
 
 - **Few-shot examples store path:**
   - Local mode: `./state/few_shot_examples.json` (gitignored).
@@ -42,7 +42,7 @@ Query the tracker for entries where:
 - `Match Quality` is set (i.e. user labeled it)
 - `Recycled` is unchecked (i.e. we haven't processed this label yet)
 
-Use `notion-api.py query-database --filter` (api_token mode) or `notion-search` (mcp mode). The query returns a `properties_summary` for each row that includes ALL relevant property types — `rich_text` (Feedback Comment, Key Factors, Why Fits), `checkbox` (Recycled), `select` (Match, Match Quality, Status). Pre-v3.0.3 versions stripped rich_text/checkbox/multi_select "for brevity" — that's been fixed; if you're invoking this skill on an older script, you'll need to either upgrade or do a custom property query.
+Use `notion-api.py query-database --filter` (api_token mode) or `notion-search` (mcp mode). The query returns a `properties_summary` for each row that includes all relevant property types — `rich_text` (Feedback Comment, Key Factors, Why Fits), `checkbox` (Recycled), `select` (Match, Match Quality, Status).
 
 If zero results: print *"No new feedback to recycle. Run when you've labeled some entries in the tracker."* and exit.
 

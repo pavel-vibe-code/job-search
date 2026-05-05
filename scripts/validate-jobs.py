@@ -60,11 +60,6 @@ def load_companies_index(companies_file: str, custom_companies_file: str) -> Dic
     consistent with fetch-and-diff.py. The custom-companies file extends the
     baseline; if a user adds a company already in the baseline, the baseline's
     config wins (the user's entry is silently ignored).
-
-    Historical context: pre-v4.0.0 this file was named `favorites.json` and
-    the CLI flag was `--favorites-file`. Renamed in v4.0.0 to better reflect
-    the conceptual role (extending the AI 50 baseline). The legacy filename
-    is still accepted as a fallback for in-place upgrades.
     """
     idx: Dict[str, dict] = {}
     # Load custom companies first, baseline second — baseline wins on duplicate.
@@ -100,24 +95,18 @@ def main():
     p.add_argument("--companies-file", default=None,
                    help="companies.json path (the AI 50 baseline). Default: <plugin-root>/config/companies.json. "
                         "In cloud mode the orchestrator should pass /tmp/companies.json (Notion-hydrated).")
-    p.add_argument("--custom-companies-file", "--favorites-file", default=None,
+    p.add_argument("--custom-companies-file", default=None,
                    dest="custom_companies_file",
                    help="custom-companies.json path (additional companies on top of "
                         "AI 50 baseline). Default: <plugin-root>/config/custom-companies.json. "
-                        "In cloud mode the orchestrator should pass /tmp/custom-companies.json "
-                        "(Notion-hydrated). The legacy --favorites-file flag is accepted as an "
-                        "alias for backward compat with pre-v4.0.0 orchestrators.")
+                        "In cloud mode the orchestrator passes /tmp/custom-companies.json "
+                        "(Notion-hydrated).")
     p.add_argument("--output", default="/tmp/validate-output.json", help="Where to write validation results")
     p.add_argument("--max-workers", type=int, default=10)
     args = p.parse_args()
 
     companies_file = args.companies_file or os.path.join(args.plugin_root, "config", "companies.json")
     custom_companies_file = args.custom_companies_file or os.path.join(args.plugin_root, "config", "custom-companies.json")
-    # Legacy fallback: pre-v4.0.0 file was config/favorites.json
-    if not os.path.exists(custom_companies_file):
-        _legacy = os.path.join(args.plugin_root, "config", "favorites.json")
-        if os.path.exists(_legacy):
-            custom_companies_file = _legacy
 
     with open(args.candidates) as f:
         candidates = json.load(f)
@@ -138,11 +127,11 @@ def main():
     # Group candidates by (ats, slug). One API call per group fetches the full
     # active-id set, against which we test every candidate in that group.
     #
-    # Dispatch order (v2.5.0+):
+    # Dispatch order:
     #   1. Try URL-based ATS detection (parses candidate.url against known ATS host
     #      patterns). Deterministic; works even when the company name doesn't match
     #      any index entry.
-    #   2. Fall back to name-index lookup (legacy path).
+    #   2. Fall back to name-index lookup.
     # Both paths converge on the same (ats, slug) group key.
     groups: Dict[Tuple[str, str], List[dict]] = defaultdict(list)
     unknown_company: List[Tuple[dict, str]] = []  # (candidate, reason_hint)

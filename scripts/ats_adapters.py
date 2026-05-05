@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Shared ATS adapter registry — single source of truth for ATS support.
 
-Purpose: extracted from validate-jobs.py / validate-favorites.py (legacy slug-variant probing) / fetch-and-diff.py
+Purpose: extracted from validate-jobs.py / validate-favorites.py / fetch-and-diff.py
 in v3.1.0 so adding a new ATS is a one-place change. Each adapter is a dict
 entry that defines:
 
@@ -30,7 +30,7 @@ import urllib.request
 from typing import Callable, Optional, Tuple
 
 
-# HTTP helper — shared with fetch-and-diff.py / validate-jobs.py / validate-favorites.py (legacy slug-variant probing)
+# HTTP helper — shared with fetch-and-diff.py / validate-jobs.py / validate-favorites.py
 # User-Agent: a custom string ("ai50-job-search/...") trips bot-filters on some
 # boards (notably OpenAI's Ashby endpoint at api.ashbyhq.com/posting-api/job-board/openai
 # returns 403 for it). Use a real-browser UA to avoid that class of block. We're
@@ -245,7 +245,7 @@ ATS_ADAPTERS: dict = {
 def ats_from_url(url: Optional[str]) -> Optional[Tuple[str, str]]:
     """Parse a listing URL to derive (ats_name, slug). Returns None if no pattern matches.
 
-    Used as the primary dispatch signal in validate-jobs.py and validate-favorites.py (legacy slug-variant probing).
+    Used as the primary dispatch signal in validate-jobs.py and validate-favorites.py.
     Adapters with `url_pattern: None` (e.g. "scrape") are skipped — they're only
     matched when explicitly tagged in the custom-companies entry, not by URL inspection.
     """

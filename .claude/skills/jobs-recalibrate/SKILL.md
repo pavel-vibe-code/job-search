@@ -84,7 +84,7 @@ For each piece of user feedback, identify the scoring lever it points at and pro
 |---|---|
 | "X scored too high" | Lower the criterion weight that gave X points; OR add an exclusion rule that drops X's pattern; OR raise minimum_score |
 | "X should have been hot" | Raise the criterion weight that DIDN'T give X enough; OR lower hot_score_threshold; OR add a bonus for X's discriminating feature |
-| "Anything matching pattern P should drop" | Add an exclusion rule (typed `title_pattern` if surface-level; free-text `exclusion_rules` if nuanced) |
+| "Anything matching pattern P should drop" | Add a typed hard exclusion rule (`title_pattern`) via jobs-settings → Hard exclusions |
 | "Pattern P should always score high" | Add a bonus criterion for P |
 | "Location should matter more" | Raise location-fit weight (or move location from criterion to hard exclusion if user implies binary intent — see Step 4) |
 

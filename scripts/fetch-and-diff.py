@@ -15,8 +15,7 @@ Supported `ats` types in companies.json:
                       or profile changes — not saved to the tracker.
   - external        : Company has no scrapeable endpoint; emit a pointer to a
                       third-party source (e.g. Wellfound). Notification only.
-  - skip            : Permanently ignored.
-  - chrome          : Legacy. Treated as `skip` with a deprecation note.
+  - skip            : Permanently ignored (URL recorded but no fetch attempted).
 
 Usage:
     python3 fetch-and-diff.py [--plugin-root /path/to/plugin] [--state-file /path/to/state.json]
@@ -61,12 +60,10 @@ def _parse_args() -> argparse.Namespace:
                    help="profile.json path. Default: <plugin-root>/config/profile.json. "
                         "Override when the orchestrator hydrates profile from a non-default location "
                         "(e.g. /tmp/profile.json built from a Notion page in cloud mode).")
-    p.add_argument("--custom-companies-file", "--favorites-file", metavar="PATH", default=None,
+    p.add_argument("--custom-companies-file", metavar="PATH", default=None,
                    dest="custom_companies_file",
                    help="custom-companies.json path (additional companies on top of "
-                        "AI 50 baseline). Default: <plugin-root>/config/custom-companies.json. "
-                        "The legacy --favorites-file flag is accepted as an alias for "
-                        "backward compat with pre-v4.0.0 orchestrators.")
+                        "AI 50 baseline). Default: <plugin-root>/config/custom-companies.json.")
     p.add_argument("--companies-file", metavar="PATH", default=None,
                    help="companies.json path. Default: <plugin-root>/config/companies.json.")
     p.add_argument("--description-limit", metavar="N", type=int, default=600,
@@ -88,12 +85,6 @@ PLUGIN_ROOT = _ARGS.plugin_root
 
 COMPANIES_FILE = _ARGS.companies_file or os.path.join(PLUGIN_ROOT, "config", "companies.json")
 CUSTOM_COMPANIES_FILE = _ARGS.custom_companies_file or os.path.join(PLUGIN_ROOT, "config", "custom-companies.json")
-# Legacy fallback: if custom-companies.json doesn't exist but the pre-v4.0.0
-# favorites.json does, use that. Lets users upgrade in place without forced migration.
-if not os.path.exists(CUSTOM_COMPANIES_FILE):
-    _legacy = os.path.join(PLUGIN_ROOT, "config", "favorites.json")
-    if os.path.exists(_legacy):
-        CUSTOM_COMPANIES_FILE = _legacy
 PROFILE_FILE   = _ARGS.profile_file   or os.path.join(PLUGIN_ROOT, "config", "profile.json")
 STATE_FILE     = _ARGS.state_file     or os.path.join(PLUGIN_ROOT, "state", "companies.json")
 
@@ -454,18 +445,14 @@ def fetch_homerun(company: dict) -> Tuple[list, Optional[str]]:
         return [], f"parse_error:{e}"
 
 
-# ── Scrape (v4.0.0) — Claude Code agent fallback ───────────────────────────
-# Pre-v4.0.0 this section called api.anthropic.com directly via urllib with
-# x-api-key auth (ANTHROPIC_API_KEY env var). v4.0.0 reimplemented scrape as
-# a Claude Code agent (.claude/agents/scrape-extract.md) so users don't need
-# an Anthropic API key — the work runs against their Claude.ai subscription
-# quota the same way other agents (compile-write, notify-hot, etc.) do.
-#
-# Mechanically: fetch-and-diff no longer fetches scrape companies at all. It
-# emits a needs_scraping.json file listing them; the search-roles agent then
-# dispatches scrape-extract per company (in parallel via the Agent tool's
-# batched-call form) and uses scripts/diff-scrape.py to compute the new/
-# removed delta against state. See agents/search-roles.md for the orchestration.
+# ── Scrape — Claude Code agent fallback ──────────────────────────────────
+# fetch-and-diff doesn't fetch scrape companies inline. It emits
+# needs_scraping.json listing them; the search-roles agent dispatches
+# scrape-extract per company (parallel via the Agent tool batched-call
+# form) and uses scripts/diff-scrape.py to compute the new/removed delta
+# against state. See agents/search-roles.md for the orchestration. This
+# design avoids requiring an Anthropic API key — extraction runs against
+# the user's Claude.ai subscription quota the same way other agents do.
 
 NEEDS_SCRAPING_FILE = "/tmp/needs_scraping.json"
 

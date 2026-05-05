@@ -1,19 +1,19 @@
 # AI 50 Job Search
 
-A Claude Code plugin that runs a weekly job search across the [Forbes AI 50](https://www.forbes.com/lists/ai50/) — and any custom companies you add on top — scores results against your CV + criteria, and writes qualifying matches into your Notion workspace. Designed to run unattended as a [Cloud Routine](https://claude.ai/code/routines).
+A Claude Code plugin that runs a job search across the [Forbes AI 50](https://www.forbes.com/lists/ai50/) — and any custom companies you add on top — scores results against your CV + criteria, and writes qualifying matches into your Notion workspace. The plugin runs when invoked (manually, or via whatever scheduling you wire up). Designed to work unattended via [Cloud Routines](https://claude.ai/code/routines), cron, or any other trigger.
 
 ```
-Every Monday at 08:00:
+Each pipeline run (manual or scheduled):
   ├─ Fetch all 50+ companies' ATS feeds in parallel
-  ├─ Diff against last week's state — only NEW jobs surface
+  ├─ Diff against last run's state — only NEW jobs surface
   ├─ Filter by your role types, languages, hard-exclusion rules
   ├─ Score against your CV (LLM-judged High / Mid / Low buckets)
   ├─ Write qualifying jobs to your Notion tracker
   ├─ Drop a "🔥 Hot Jobs — <date>" digest in your Notion sidebar
-  └─ Recycle your tracker labels into next week's scoring (weekly)
+  └─ Recycle your tracker labels into next run's scoring (when it's been ≥ 7 days since last cycle)
 ```
 
-You wake up Monday with 0–10 new candidates pre-vetted. No more manually trawling 50+ careers pages.
+A typical setup: wire it up via Cloud Routine to fire weekly. You wake up Monday with 0–10 new candidates pre-vetted. No more manually trawling 50+ careers pages. (Daily / monthly / event-triggered cadences also work — the plugin doesn't care, it runs when invoked.)
 
 **What v1.0 ships with** (after iteration through internal v2.x → v4.x): CV-grounded LLM-judged categorical scoring (High / Mid / Low buckets, not numeric rubric); 6 deterministic ATS adapters (Ashby, Greenhouse incl. EU subdomain, Lever, Comeet, Teamtailor, Homerun) plus a Claude Code agent–based scrape fallback for any HTML careers page (no API key required); Notion-feedback learning loop that improves scoring week-over-week from your tracker labels; `jobs-extend-companies` skill for dialogue-based add/remove/update of custom-tracked companies on top of the AI 50 baseline (no JSON editing); `jobs-scrape-page` skill for ad-hoc extraction-quality testing; per-run token + cost tracking against your Claude.ai subscription quota. See [CHANGELOG.md](CHANGELOG.md) for the full development trail.
 
@@ -33,7 +33,7 @@ claude
 "run the job search"       # first run; populates the tracker
 ```
 
-For Cloud Routine setup (scheduled weekly runs), see [INSTALL.md](INSTALL.md).
+For Cloud Routine setup (one common way to fire the pipeline on a schedule), see [INSTALL.md](INSTALL.md).
 
 ---
 
@@ -96,14 +96,14 @@ This plugin owns the scattered-source problem: fetches everything, runs your fil
 - **Names live in the repo, IDs live in your local cache.** The plugin source is generic — anyone can clone and use it without forking. The IDs of YOUR Notion artifacts are resolved at run time from the names in `config/connectors.json[notion.names]`, with a self-healing cache fallback (`state/cached-ids.json`).
 - **Two auth paths:** Notion MCP (OAuth, plug-and-play, fine for laptop runs) or API token (deterministic, recommended for Cloud Routines where >95% per-run success matters).
 - **Markdown fallback for resilience.** If Notion writes fail mid-run (auth blip, API outage), the orchestrator emits the rows to `outputs/<date>-tracker-fallback.md` so results aren't lost; state is auto-corrected so next run retries.
-- **Notion-only data layer, no external DB.** State, profile, favorites all live in your Notion workspace. No Postgres, no S3, no infra. The user already has Notion; the plugin just uses it.
+- **Notion-only data layer, no external DB.** State, profile, favorites all live in the Notion workspace this plugin sets up for you. No Postgres, no S3, no infra. Notion was chosen as the data layer because it gives non-coders a usable database UI without any server or schema-migration setup; users without prior Notion experience can sign up free at notion.so during setup.
 - **172 unit tests pin the filter and dispatch logic.** The tests cover eight common candidate personas (home-region only, open to relocation, multi-region remote, etc.) plus URL→ATS dispatch coverage, so future changes can't silently break filtering for one archetype or break a connector while looking fine for another.
 
 ---
 
 ## Status
 
-v1.0.0 — first public release. Runs reliably as a weekly Cloud Routine. Tested end-to-end against multiple fresh Notion workspaces; built on ~20 pre-public iterations through Apr–May 2026 (preserved as historical tags `v2.3.0` → `v3.3.0` in the git history for development context). The public release cadence starts at v1.0.0; future releases bump v1.x.x.
+v1.0.x — first public release line. Runs reliably under a Cloud Routine (or any other invocation mechanism). Tested end-to-end against fresh Notion workspaces. Public versioning starts at v1.0.0; future releases follow semver.
 
 Known limitations:
 - `removed_jobs_pending` (closures the agent didn't reach mid-failure) currently relies on next run's diff to re-surface; rare edge case can lose a closure.
@@ -116,7 +116,7 @@ Known limitations:
 ## Requirements
 
 - [Claude Code](https://claude.ai/code) installed (CLI / desktop / web), with a Claude.ai subscription (Pro or Max recommended) OR direct API key auth
-- A Notion account
+- A Notion account (free at notion.so — the plugin uses Notion as its data layer; no prior Notion experience needed)
 - Python 3 (always present on macOS / most Linux)
 
 That's it. No `pip install`, no Anthropic API key required (the LLM work runs on Claude as the agent substrate), no Postgres, no Redis, no Docker.

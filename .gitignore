@@ -9,9 +9,6 @@ state/few_shot_examples.json
 # Authoritative source-of-truth lives in Notion (cloud mode) or here (local mode).
 config/profile.json
 config/custom-companies.json
-# Legacy filename pre-v4.0.0 — kept here so old installs that haven't migrated
-# don't accidentally commit their list. New installs use custom-companies.json.
-config/favorites.json
 
 # Claude Code per-project settings (user adds their own)
 .claude/settings.local.json

@@ -37,7 +37,7 @@ Look up the page ID:
 
 Load the current custom-companies array. Cloud: `notion-api.py fetch-page-body --page-id <extended_companies_page_id>` and parse the JSON code block. Local: `json.load(open('./config/custom-companies.json'))`.
 
-If the data has a `_meta` first entry (legacy from v2.x): preserve it through writes, but skip it when listing/searching.
+If the data has a `_meta` first entry (a metadata header some installs use): preserve it through writes, but skip it when listing/searching.
 
 ## Step 1 — Ask intent
 

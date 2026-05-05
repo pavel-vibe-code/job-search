@@ -21,7 +21,7 @@ For installation and Cloud Routine setup, see [INSTALL.md](INSTALL.md). For tech
 
 ## What this plugin does for you
 
-You give it a profile (your CV + criteria) and a list of companies. Once a week (or whenever you trigger it manually), it:
+You give it a profile (your CV + criteria) and a list of companies. Each time it runs (you trigger it manually, or you wire it up to fire on a schedule via Cloud Routines / cron / a hook — the plugin itself has no built-in cadence), it:
 
 1. Fetches every job currently posted by those companies
 2. Filters out jobs that conflict with your hard rules (wrong language, excluded country, etc.)
@@ -141,7 +141,7 @@ Runs the setup wizard. Use this for first-time install or if you want to fully r
 ```
 run the job search
 ```
-Runs the full 6-pass pipeline once. ~60–90 seconds. Use this for an on-demand search outside your weekly Routine cadence — you don't need to trigger this manually if a Cloud Routine handles weekly fires.
+Runs the full 6-pass pipeline once. ~60–90 seconds. Use this for on-demand search; if you've wired up a Cloud Routine (or any other scheduling mechanism) to fire it automatically, you don't need to trigger it manually except for ad-hoc runs.
 
 ### `/jobs-extend-companies` — manage custom companies
 
@@ -301,9 +301,9 @@ scrape this page: https://example.com/careers
 ```
 You'll see the extracted job array. If the agent returns `extraction_quality: "no_static_content"` (page is JS-only), the company should be `ats: skip` rather than scrape. If quality is good, proceed to `extend companies` to add it.
 
-### How to schedule weekly automatic runs (Cloud Routine)
+### How to wire up automatic runs (Cloud Routine)
 
-See [INSTALL.md §3](INSTALL.md). One-time setup; after that, runs fire on schedule with no further action.
+The plugin itself has no built-in scheduler — it runs when something invokes it. Cloud Routines are one way to schedule that invocation (the canonical one for unattended use); cron / shell hooks / external triggers also work. See [INSTALL.md §3](INSTALL.md) for the Cloud Routine setup. After that, runs fire on whatever cadence you configured — no further action required.
 
 ### How to re-run setup if something gets stuck
 
@@ -338,8 +338,8 @@ Your **Job Tracker** Notion database has these columns:
 |---|---|---|
 | **Title** | text | Job title from the source ATS |
 | **Company** | text | Company name |
-| **Score** | number | Legacy structured-rubric score (only used if cv_json absent in profile; null in v3 path) |
-| **Match** | select | `High` / `Mid` / `Low` (categorical verdict from LLM; primary signal in v3 path) |
+| **Score** | number | Reserved (always null) — kept in schema for compatibility |
+| **Match** | select | `High` / `Mid` / `Low` (categorical verdict from LLM; the primary signal) |
 | **Location** | text | Location string from the source |
 | **Status** | select | `New` (your action: triage) / `Reviewed` / `Applied` / `Closed` (auto-set when ATS removes the listing) / `Not interested` / `Uncertain` (validation could not confirm live, e.g. scrape-tracked) |
 | **URL** | url | Direct link to the job description |
@@ -359,7 +359,7 @@ Your **Job Tracker** Notion database has these columns:
 4. Set **Match Quality** based on whether the LLM's call was right: Great / OK / Bad.
 5. Optionally add **Feedback Comment** explaining the label (especially for Bad).
 
-The next weekly run auto-folds your Match Quality + Feedback Comment into the scoring prompt as anti-patterns + few-shot examples — scoring gets sharper week over week.
+The next pipeline run (whenever it fires) auto-folds your Match Quality + Feedback Comment into the scoring prompt as anti-patterns + few-shot examples — scoring sharpens with each iteration of label-then-run.
 
 ---
 
@@ -367,7 +367,7 @@ The next weekly run auto-folds your Match Quality + Feedback Comment into the sc
 
 The plugin runs on **Claude as the LLM substrate** — billed against your Claude.ai subscription quota (Pro / Max), not pay-per-token. No Anthropic API key required.
 
-### Per weekly run
+### Per pipeline run
 
 | Component | Subscription quota usage |
 |---|---|
@@ -384,8 +384,8 @@ The plugin runs on **Claude as the LLM substrate** — billed against your Claud
 - Haiku override: ~$1–3 equivalent (lower quality on borderline calls)
 
 **Your subscription's perspective:**
-- **Pro plan** (5-hour rolling window): a weekly fire is a meaningful chunk. Tight if you also use Claude Code for daily work; comfortable if Routine is your primary scheduled use.
-- **Max plan** (5x Pro): comfortable headroom for weekly fires + daily Claude Code use.
+- **Pro plan** (5-hour rolling window): each pipeline run is a meaningful chunk of the cap. If you're firing weekly via a Cloud Routine and also using Claude Code for daily work, expect to feel quota pressure. Loosen by switching to Sonnet for scoring (see below).
+- **Max plan** (5x Pro): comfortable headroom for routine pipeline fires + daily Claude Code use, regardless of cadence.
 - **API-key auth** (Claude Code wired to direct Anthropic API key): pay-per-token at the rates above.
 
 ### Per-skill costs

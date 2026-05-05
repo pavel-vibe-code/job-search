@@ -24,7 +24,7 @@ Existing tracker rows have their LLM-derived fields (`Match`, `Why Fits`, `Key F
 
 Read `state/.setup_complete[deployment_mode]` and `[auth_method]`.
 
-In **cloud mode**: hydrate profile from the AI 50 Profile Notion page to `/tmp/profile.json` (same as jobs-run Pass P-4). The profile MUST have `cv_json` for the v3 scoring path; otherwise abort with: *"jobs-rescore requires CV-grounded categorical scoring (cv_json in profile). Run setup again with the CV upload step, or use the legacy structured-rubric scoring path which already runs at create-time and isn't bug-prone."*
+In **cloud mode**: hydrate profile from the AI 50 Profile Notion page to `/tmp/profile.json` (same as jobs-run Pass P-4). The profile MUST have `cv_json` (re-run jobs-setup if missing — CV is required to score).
 
 In **local mode**: read `./config/profile.json` directly.
 

@@ -23,7 +23,7 @@ You handle both sides of the tracker delta: writing new qualifying jobs and mark
 
 ## Tool discipline
 
-This agent intentionally does NOT declare a `tools:` allowlist in its frontmatter. The hardcoded `mcp__notion__*` allowlist of v2.2.0 broke silently when Notion was installed via the Connectors UI (which assigns a UUID-based server-id, not the literal `notion`). Without the allowlist you inherit whatever the parent orchestrator has, and you dispatch through the `notion_call` abstraction below.
+This agent intentionally does NOT declare a `tools:` allowlist in its frontmatter. A hardcoded `mcp__notion__*` allowlist breaks silently when Notion is installed via the Connectors UI (which assigns a UUID-based server-id, not the literal `notion`). Without the allowlist this agent inherits whatever the parent orchestrator has, and dispatches through the `notion_call` abstraction below.
 
 ### `notion_call` — the dispatch abstraction
 
@@ -105,7 +105,7 @@ Fields:
 - **rows_already_written** — best-effort list of qualifying jobs that DID land in the tracker before the failure. May be `[]` if the failure happened before any writes succeeded. Same `ats_job_id` rule as above (echo the exact `id`).
 - **failed_ats_job_ids** — the `ats_job_id` values corresponding to `rows_to_write` entries (jobs that didn't land). The orchestrator REMOVES these from `/tmp/ai50-state.json` before Pass 4 persists state — preventing state poisoning. This list MUST contain exactly one entry per `rows_to_write` entry.
 - **closed_ats_job_ids** — IDs from `removed_jobs` that the agent successfully marked Closed before the failure. The orchestrator does NOT touch state for these (closed-from-ATS jobs are already absent from `/tmp/ai50-state.json` because Pass 1's fetch-and-diff doesn't include them in current state).
-- **removed_jobs_pending** — IDs from `removed_jobs` that the agent did NOT reach. The orchestrator carries them forward; the typical assumption is the next run's search-roles diff will surface the same removed_jobs and compile-write will retry the close-marking. (Edge case: if a job is briefly re-listed and re-removed between runs, the close-mark may be lost. A `state/pending-closures.json` durable queue is on the v2.4 roadmap; for now, surface this as a sticky warning if `removed_jobs_pending` is non-empty.)
+- **removed_jobs_pending** — IDs from `removed_jobs` that the agent did NOT reach. The orchestrator carries them forward; the assumption is the next run's search-roles diff will surface the same removed_jobs and compile-write will retry the close-marking. (Edge case: if a job is briefly re-listed and re-removed between runs, the close-mark may be lost. A durable `state/pending-closures.json` queue is on the backlog; for now, surface this as a sticky warning if `removed_jobs_pending` is non-empty.)
 
 **All four list fields default to `[]` if absent or null.** The orchestrator MUST handle missing fields gracefully (treat as empty), not crash.
 
@@ -121,7 +121,7 @@ The orchestrator passes the following into your prompt:
 - **Tracker DB ID** (resolved by jobs-run Step P-3 from `state/cached-ids.json`)
 - **Profile path** — `/tmp/profile.json` (cloud mode) or `./config/profile.json` (local mode)
 - **Connectors path** — `./config/connectors.json` (read auth_method + mcp_tool_prefix)
-- **Candidates file** — `/tmp/pass3-input.json`. Schema (v2.5.2+):
+- **Candidates file** — `/tmp/pass3-input.json`. Schema:
   ```json
   {
     "live":         [<candidates Pass 2 confirmed live>],
@@ -130,14 +130,12 @@ The orchestrator passes the following into your prompt:
     "tracker_db_id": "..."
   }
   ```
-  Earlier versions (v2.5.1 and prior) passed candidates as a flat array (live only). For backward compat, if `pass3-input.json` is a JSON array, treat it as `{"live": <array>, "uncertain": [], "removed_jobs": [], ...}`.
-
 Read the profile JSON for:
-- `scoring.criteria` — required, dict of weighted criteria
-- `scoring.bonuses` — optional, dict of bonus criteria (lift score but don't define it)
-- `scoring.minimum_score`, `scoring.hot_score_threshold`, `scoring.max_score`
-- `hard_exclusions` (v2.5.0+) — typed rules object; jobs matching ANY are dropped before scoring. See Step 2 for the schema.
-- `exclusion_rules` (legacy, still honored) — array of free-text rules; jobs matching ANY are dropped before scoring
+- `cv_json` — required, the parsed CV that grounds scoring
+- `scoring.instructions` — optional free-form hint
+- `scoring.show_low` — optional bool; default false
+- `scoring.model` — optional model override (default: claude-opus-4-7)
+- `hard_exclusions.rules` — typed rules array; jobs matching ANY are dropped before scoring. See Step 2 for the schema.
 - `candidate.spoken_languages` — array; any job requiring a language not in this list is excluded
 - `candidate` and `context` for general scoring evidence
 
@@ -146,18 +144,17 @@ Read the connectors JSON only for:
 - `notion.auth_method` (`"mcp"` or `"api_token"`) — picks transport
 - `notion.mcp_tool_prefix` (only if `auth_method == "mcp"`)
 
-**Do NOT read tracker_database_id from connectors.json** — that field is no longer there in v2.3+. The orchestrator passes the resolved ID inline. Earlier versions of this prompt had the agent read the ID from connectors.json; that path was removed when per-user IDs migrated to `state/cached-ids.json`.
+The tracker_database_id is passed inline by the orchestrator (resolved via `state/cached-ids.json`); don't read it from connectors.json.
 
 ## Step 2 — Apply hard exclusions FIRST
 
 Before scoring anything, walk every candidate through:
-1. **Typed `hard_exclusions.rules`** (v2.5.0+ schema, preferred when present)
-2. **Legacy `exclusion_rules`** (free-text, fallback for pre-v2.5 profiles)
-3. **`candidate.spoken_languages`** (always honored)
+1. **Typed `hard_exclusions.rules`**
+2. **`candidate.spoken_languages`** (always honored)
 
 Drop the candidate (don't score, don't write) if ANY rule matches. Track drop reasons for the run summary, naming the matched rule for diagnostics.
 
-### Typed `hard_exclusions` rule types (v2.5.0+)
+### Typed `hard_exclusions` rule types
 
 ```json
 {
@@ -182,28 +179,9 @@ Apply each rule type by its semantics:
 | `seniority_floor` | Listing seniority is below `minimum_level` (e.g. junior/entry-level when floor is senior) |
 | `remote_country_lock` | Listing is "Remote — \<country>" where \<country> is NOT in `eligible_remote_regions` (or IS in `reject_remote_in` if that variant of the rule is used) |
 
-If `hard_exclusions.rules` is missing, empty, or has `schema_version` not equal to 1, fall back to legacy `exclusion_rules` interpretation (Step 2 legacy path below).
-
-### Legacy `exclusion_rules` (free-text)
-
-Common patterns (specifics depend on user's profile):
-- Language: job requires fluency in a language not in `candidate.spoken_languages`
-- Role category: job is a pure Sales / Marketing / Engineering role when user's role_types don't cover those
-- Location: on-site outside the user's eligible cities; remote with country-residency lock to a country not in eligible_regions
-- Custom rules: anything the wizard moved out of scoring during Step 4b (e.g. "company is not AI-native")
-
-When BOTH typed and legacy forms are present, both are honored — typed handles the deterministic patterns, legacy handles whatever didn't fit the typed schema (judgment-call rules).
+If `hard_exclusions.rules` is missing, empty, or has `schema_version` not equal to 1, abort with: *"Profile lacks typed `hard_exclusions.rules` — re-run jobs-setup or use jobs-settings → Hard exclusions to add typed rules."*
 
 ## Step 3 — Score the survivors
-
-**Pick the scoring path** based on profile shape:
-
-| Profile has | Use |
-|---|---|
-| `cv_json` field | **v3 path (Step 3.v3 below)** — LLM-judged categorical scoring, High/Mid/Low buckets |
-| No `cv_json` (legacy) | **Legacy path (Step 3.legacy below)** — structured rubric, numeric score |
-
-### Step 3.v3 — LLM-judged categorical scoring (when `cv_json` present)
 
 For each survivor, build a single LLM scoring prompt and parse the response. **Evidence-grounded reasoning is mandatory**: every match/concern/gap must cite a specific JD passage AND a specific profile field — surface keyword overlap is not enough. Bucket assignment must be defensible from the cited evidence.
 
@@ -337,64 +315,46 @@ Step 5 — Output JSON only:
 - **Anthropic prompt caching** is mandatory for the constant profile section (narrative + cv_json + scoring.instructions + few_shot_examples). Cache control: `{"type": "ephemeral"}` on the profile content block. Across ~200 candidates this is the difference between $30 and $150 per run on Opus.
 - **temperature=0** for stability across runs. Categorical decisions should be sticky.
 - **Parse the response as JSON.** If parsing fails, log the raw response and assign `Mid` with `confidence: "low"` and rationale noting the parse failure — never fail the run on a single LLM hiccup. Track parse-failure count in run summary so we can detect prompt drift.
-- **Track token usage** (v3.0.5+). Anthropic API responses include a `usage` object: `{input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens}`. Accumulate across all N candidate scoring calls in this run. Include the totals in the success-response envelope returned to the orchestrator (see Step 6 — "Return new jobs to orchestrator"). The orchestrator aggregates across passes and prints a token+cost block in the run summary.
+- **Track token usage.** Anthropic API responses include a `usage` object: `{input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens}`. Accumulate across all N candidate scoring calls in this run. Include the totals in the success-response envelope returned to the orchestrator (see Step 6 — "Return new jobs to orchestrator"). The orchestrator aggregates across passes and prints a token+cost block in the run summary.
 
 **Quality bar:** the `rationale` and `key_factors` should make the verdict defensible to a reader who has only the JD + profile in front of them. If you (the agent) wrote a rationale that could equally apply to any role with the same title, the rationale is too generic — re-prompt or downgrade confidence.
 
 **Bucket assignment is match-density-driven, evidence-grounded, not holistic-vibe.** The LLM enumerates factors first with quote-evidence, then weighs. Sparse JDs default to Mid. Critical concerns downgrade aggressively from pure match counting.
 
-### Step 3.legacy — Structured rubric (when no `cv_json`)
-
-For each surviving candidate, score using the **rubric in `profile.json[scoring]` — no inline defaults**. The user's profile is the source of truth; this prompt MUST NOT inject a default rubric.
-
-The candidate's `description` field is the truncated job description (default cap 600 chars, set by `fetch-and-diff.py --description-limit`). Use it as primary scoring evidence — do not re-fetch the URL.
-
-**How to score:**
-
-1. **Criteria (`scoring.criteria`)** — for each entry, score `0` (no match), `0.5` (partial), or `1` (full match), then multiply by `weight`. Sum across all criteria → core score.
-2. **Bonuses (`scoring.bonuses`)** — same matching logic, but bonuses lift a score; they're not core. Sum bonus contributions and add to the core score.
-3. **Final score = core + bonuses.** Floor at 0. Cap at `scoring.max_score` (which already accounts for bonus ceiling).
-4. Compare to `profile.json[scoring.minimum_score]` to decide which to write to the tracker.
-
-Write a 2–3 sentence **"Why Fits"** for each qualifying job that names which criteria scored and at what weight. Be specific (*"Director-level CX role at AI-native Series B; remote EU = full match on location+seniority+role-type (2+2+1) + experience match (1) + Series B+ bonus = 7"*), not vague (*"Strong fit"*). The user reads this to understand why a role surfaced.
-
 ## Step 4 — Write new qualifying jobs to tracker
 
-### REQUIRED v3 path writes (do not skip)
+### REQUIRED writes (do not skip)
 
-When writing v3-path entries (profile has `cv_json` → categorical scoring), every page MUST include both rationale fields:
+Every page MUST include both rationale fields:
 
 - **`Why Fits`** — the `rationale` text from the scoring response (1–3 sentences explaining the verdict)
 - **`Key Factors`** — the `key_factors` array joined as one bulleted line per element. Preserve the `match:` / `concern:` / `gap:` prefix on each line. Example: `"match: AI-native B2B SaaS\nconcern: 30%+ travel\ngap: no fintech background"` (literal `\n` newlines between bullets).
 
-These are NOT optional. A v3 write that populates `Why Fits` but leaves `Key Factors` empty (or vice versa) is a bug — the user-facing tracker becomes useless for triage. If the LLM response is missing `rationale` or `key_factors`, that's a parse failure: log it and assign a placeholder rationale ("LLM response incomplete; spot-check this entry") rather than skipping the field.
-
-> **Note (v1.0.1):** Earlier prompts described a parallel `Reasoning` column carrying the same content as `Why Fits`. That column was removed in v1.0.1 cleanup — it was redundant and led to agents writing one but not the other. Single source: `Why Fits` carries the rationale; `Key Factors` carries the bulleted evidence list.
+These are NOT optional. Writing `Why Fits` but leaving `Key Factors` empty (or vice versa) is a bug — the user-facing tracker becomes useless for triage. If the LLM response is missing `rationale` or `key_factors`, that's a parse failure: log it and assign a placeholder rationale ("LLM response incomplete; spot-check this entry") rather than skipping the field.
 
 **Eligibility for write:**
-- v3 path: by default, write candidates with `verdict in ("High", "Mid")` — Low entries are dropped (don't bloat tracker with rejections; they're documented in run summary count).
-  - **Override:** if `profile.scoring.show_low == true`, also write Low entries (with `Match: "Low"`). This is opt-in for power users who want to see all decisions in their tracker (useful for jobs-recycle-feedback training: labeling Low entries that should have been Mid trains the scoring prompt). Default is `false` (omit Low writes).
-  - User can also disagree retroactively by labeling Low entries via the Match Quality column — see v3.0.0 jobs-recycle-feedback.
-- Legacy path: write jobs scoring ≥ `profile.json[scoring.minimum_score]`.
+- By default, write candidates with `verdict in ("High", "Mid")` — Low entries are dropped (don't bloat tracker with rejections; they're documented in run summary count).
+- **Override:** if `profile.scoring.show_low == true`, also write Low entries (with `Match: "Low"`). Useful for users who want to see all decisions in their tracker (also useful for jobs-recycle-feedback training: labeling Low entries that should have been Mid trains the scoring prompt). Default is `false` (omit Low writes).
+- User can also disagree retroactively by labeling Low entries via the Match Quality column — see jobs-recycle-feedback.
 
-Query existing rows in the **tracker DB ID passed inline by the orchestrator** (NOT from connectors.json — that field doesn't exist in v2.3+; see Step 1) to collect known URLs. Skip any candidate whose URL is already present. Use `query-database` (api_token mode) or `notion-search` against the data source (mcp mode).
+Query existing rows in the **tracker DB ID passed inline by the orchestrator** to collect known URLs. Skip any candidate whose URL is already present. Use `query-database` (api_token mode) or `notion-search` against the data source (mcp mode).
 
-Create a new page per qualifying job. **Schema must match what the wizard creates** (any drift here = silent property-not-found errors that look like the writes succeeded but no values landed):
+Create a new page per qualifying job. **Schema must match what the setup wizard creates** (any drift here = silent property-not-found errors that look like the writes succeeded but no values landed):
 
-| Wizard column | Type      | v3 path value                                       | Legacy path value                                |
-|---------------|-----------|-----------------------------------------------------|--------------------------------------------------|
-| `Title`       | title     | Exact job title                                     | Exact job title                                  |
-| `Company`     | rich_text | Company name (NOT a select)                         | Company name                                     |
-| `Score`       | number    | `null` (categorical takes its place)                | Final fit score                                  |
-| `Match`       | select    | `"High"` / `"Mid"` (and `"Low"` if `profile.scoring.show_low == true`) | (omit — null in legacy path)                     |
-| `Location`    | rich_text | Location string                                     | Location string                                  |
-| `Status`      | select    | `"New"` for live; `"Uncertain"` for Pass-2-uncertain | `"New"` for live; `"Uncertain"` for Pass-2-uncertain |
-| `URL`         | url       | Direct ATS URL                                      | Direct ATS URL                                   |
-| `Department`  | rich_text | Department string                                   | Department string                                |
-| `Source`      | rich_text | `"ai50"` / `"custom"`                                | `"ai50"` / `"custom"`                            |
-| `Date Added`  | date      | Today, ISO 8601                                     | Today, ISO 8601                                  |
-| `Why Fits`    | rich_text | LLM rationale (1-3 sentences, why this verdict)     | 2-3 sentence rubric rationale                    |
-| `Key Factors` | rich_text | Bulleted match: / concern: / gap: lines (one per line) | (omit — null in legacy path)                  |
+| Column | Type | Value |
+|---|---|---|
+| `Title` | title | Exact job title |
+| `Company` | rich_text | Company name (NOT a select) |
+| `Score` | number | `null` (categorical Match takes its place) |
+| `Match` | select | `"High"` / `"Mid"` (and `"Low"` if `profile.scoring.show_low == true`) |
+| `Location` | rich_text | Location string |
+| `Status` | select | `"New"` for live; `"Uncertain"` for Pass-2-uncertain |
+| `URL` | url | Direct ATS URL |
+| `Department` | rich_text | Department string |
+| `Source` | rich_text | `"ai50"` / `"custom"` |
+| `Date Added` | date | Today, ISO 8601 |
+| `Why Fits` | rich_text | LLM rationale, 1-3 sentences |
+| `Key Factors` | rich_text | Bulleted match: / concern: / gap: lines (one per line) |
 
 When using `notion-api.py create-pages`, the helper's `pack_properties` heuristic accepts a flat `{name: value}` shape; pre-built nested objects (like `{"Status": {"select": {"name": "New"}}}`) pass through unchanged.
 
@@ -423,11 +383,9 @@ Note: `Why Fits` carries the rationale text (the `rationale` from the scoring re
 
 `connector_type` is hard-pinned to `"notion"` for production runs. Markdown output is NOT a branch this agent takes — the orchestrator drives the markdown fallback by reading `/tmp/compile-write-failed.json` (see "Failure contract" above) when this agent aborts on Notion errors.
 
-## Step 4b — Write uncertain candidates with `Status: Uncertain` (v2.5.2+)
+## Step 4b — Write uncertain candidates with `Status: Uncertain`
 
-Pre-v2.5.2, Pass 2 uncertains were dropped at the orchestrator → compile-write boundary. Pass 4 still persisted their job IDs to state, so next run's diff treated them as "seen" and they were silently consumed without ever reaching the user. Real bug — surfaced after v2.4.0 first cloud-routine fire showed 41 uncertains across Deel / JetBrains / Back Market and others.
-
-**Now** — uncertains travel with live to compile-write and get written to the tracker with a distinct `Status: Uncertain`. Process:
+Uncertains travel alongside live candidates from Pass 2 to compile-write and get written to the tracker with a distinct `Status: Uncertain`. Process:
 
 1. Read `pass3-input.json` for the `uncertain` array.
 2. Apply the **same hard exclusions** as live candidates (Step 2). An uncertain that violates a hard exclusion (e.g. wrong country) is dropped before writing — no value in surfacing it.
@@ -435,7 +393,7 @@ Pre-v2.5.2, Pass 2 uncertains were dropped at the orchestrator → compile-write
 4. **Do NOT score** uncertains — there's no validation signal, so any score would be misleading. Set `Score: null` (or 0 if the field rejects null).
 5. **Do NOT include in hot list** — uncertains don't have validated state and shouldn't dominate the user's high-priority view.
 6. Write each uncertain with:
-   - `Status: "Uncertain"` (the new select value added in v2.5.2's tracker schema)
+   - `Status: "Uncertain"` (a select value in the tracker schema)
    - `Why Fits`: replace the rationale with a brief uncertain-reason note from Pass 2's output, e.g. *"Validator could not confirm live (reason: ats_unsupported:lever). User to spot-check."*
    - All other fields populated as for live entries.
 
@@ -455,7 +413,7 @@ This keeps the tracker accurate without requiring manual cleanup. Removed jobs y
 
 ## Step 6 — Return new jobs to orchestrator
 
-Return an envelope with both the newly-written jobs AND the token usage from this pass (v3.0.5+):
+Return an envelope with both the newly-written jobs AND the token usage from this pass:
 
 ```json
 {
@@ -472,7 +430,7 @@ Return an envelope with both the newly-written jobs AND the token usage from thi
       "source": "ai50"
     }
   ],
-  "uncertain_written": [/* same shape, written with Status: Uncertain (v2.5.2+) */],
+  "uncertain_written": [/* same shape, written with Status: Uncertain */],
   "usage": {
     "model": "claude-opus-4-7",
     "extended_thinking": true,
@@ -489,7 +447,7 @@ Return an envelope with both the newly-written jobs AND the token usage from thi
 
 `usage` accumulates across all N candidate scoring calls in this pass. The orchestrator aggregates across passes (compile-write + notify-hot + jobs-recalibrate + jobs-recycle-feedback when invoked) and prints a single token+cost block in the run summary.
 
-For backward compat with pre-v3.0.5 orchestrators that expect just an array, ALSO accept that shape — orchestrator should handle both: if the response is an array, treat as `newly_written_jobs` with `usage: null`. Modern orchestrators get the envelope.
+The orchestrator parses this envelope shape; it expects `newly_written_jobs` and `usage` as separate fields.
 
 ## Step 7 — Run summary
 

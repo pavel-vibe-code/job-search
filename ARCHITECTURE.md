@@ -80,7 +80,7 @@ The user picks one during setup. Both run the same pipeline; the difference is w
 
 **Why two modes?**
 
-The Notion-based mode keeps the plugin repo generic and shareable. A Cloud Routine container is ephemeral — the local filesystem is wiped between runs — so any per-user data MUST live in a durable backing store. Notion is that store: the user already has access, the data has a usable UI for editing, and there's no separate database to provision.
+The Notion-based mode keeps the plugin repo generic and shareable. A Cloud Routine container is ephemeral — the local filesystem is wiped between runs — so any per-user data MUST live in a durable backing store. Notion is that store: it provides a usable read/edit UI out of the box, and there's no separate database to provision. See §10.2 for the full design rationale on Notion as the backing store.
 
 Local mode exists for two reasons: (a) it's the one-step onboarding path before a user wants to commit to the Routine, and (b) it lets developers iterate on the plugin without a Notion round-trip on every test.
 
@@ -145,10 +145,11 @@ MCP has nicer ergonomics for one-off interactive sessions — no token to mint, 
 ┌──────────────────┐
 │  Pass 3          │  compile-write agent:
 │  ~30-60 seconds  │   • Apply hard exclusions (language, role category)
-│  score & write   │   • Score against profile (CV-grounded LLM judgment
-│                  │     when cv_json present, structured rubric otherwise)
+│  score & write   │   • Score against CV-grounded profile (LLM-judged
+│                  │     categorical: High / Mid / Low buckets)
 │                  │   • Query tracker DB for dedup (skip existing URLs)
-│                  │   • Write rows scoring ≥ minimum_score (or High/Mid)
+│                  │   • Write rows with verdict ∈ {High, Mid}
+│                  │     (also Low if profile.scoring.show_low == true)
 │                  │   • Mark removed_jobs as Closed
 │                  │   • On failure: emit /tmp/compile-write-failed.json
 └──────────────────┘
@@ -322,44 +323,13 @@ script: new_jobs (raw diff) ──► agent applies filters ──► candidates
 
 ## 7. Scoring rubric (Pass 3 details)
 
-The plugin supports two scoring paths. The compile-write agent picks the path based on whether `profile.cv_json` is present:
+Scoring is **CV-grounded LLM judgment**: hard exclusions filter aggressively first (deterministic, free), then surviving candidates get LLM-judged categorical scoring (`High` / `Mid` / `Low`) against the candidate's CV + free-form context. The Match column is the primary signal in the tracker; the numeric Score column is reserved (always null).
 
-- **CV-grounded LLM judgment (default when `cv_json` is present).** Hard exclusions filter aggressively first (deterministic, free), then surviving candidates get LLM-judged categorical scoring (`High` / `Mid` / `Low`) against a CV-grounded free-text profile. See §7.5.
-- **Structured numeric rubric (fallback).** A weighted-criteria score is computed deterministically. Used when `cv_json` is not present. See §7.1–§7.4.
+The plugin also closes the loop with a **Notion-feedback learning layer** — the `jobs-recycle-feedback` skill processes user-labeled tracker rows on a 7-day cadence, deriving anti-patterns and few-shot examples that get injected into the next run's Pass 3 LLM prompt. See §7.3.
 
-The plugin also closes the loop with a **Notion-feedback learning layer** — the `jobs-recycle-feedback` skill processes user-labeled tracker rows weekly, deriving anti-patterns and few-shot examples that get injected into the next run's Pass 3 LLM prompt. See §7.6.
+### 7.1 Hard exclusions (applied BEFORE scoring)
 
-The setup wizard collects criteria + priorities (high/medium/low) in plain English; the wizard's agent reflects on the input and proposes weights + thresholds. The user approves / adjusts / re-thinks.
-
-### 7.1 Schema in profile.json (structured path)
-
-```json
-{
-  "scoring": {
-    "minimum_score": 4,
-    "hot_score_threshold": 6,
-    "max_score": 8,
-    "criteria": {
-      "seniority_match":    { "weight": 2, "priority": "high",   "description": "...", "rationale": "..." },
-      "ai_native_company":  { "weight": 2, "priority": "high",   "description": "..." },
-      "location_fit":       { "weight": 2, "priority": "high",   "description": "..." },
-      "role_type_alignment":{ "weight": 1, "priority": "medium", "description": "..." },
-      "experience_match":   { "weight": 1, "priority": "medium", "description": "..." }
-    },
-    "bonuses": {
-      "growth_stage":       { "weight": 1, "priority": "low",    "description": "..." },
-      "comp_transparency":  { "weight": 1, "priority": "low",    "description": "..." }
-    },
-    "_proposal_explanation": "<2-3 sentences from the wizard agent>"
-  }
-}
-```
-
-`criteria` define the core score; `bonuses` lift borderline matches into hot territory but don't drag down a great match that lacks them.
-
-### 7.2 Hard exclusions (applied BEFORE scoring)
-
-Two coexisting forms — typed schema (preferred) and legacy free-text:
+Typed schema:
 
 **Typed schema:** `profile.json[hard_exclusions]`, a structured block consumers apply deterministically at Pass 1 (fetch-and-diff) before any LLM scoring.
 
@@ -376,43 +346,13 @@ Two coexisting forms — typed schema (preferred) and legacy free-text:
 }
 ```
 
-**Legacy free-text:** `profile.json[exclusion_rules]`, an array of free-text rules interpreted by the compile-write agent at scoring time.
-
-```json
-[
-  "Job explicitly requires fluency in a language not in candidate.spoken_languages",
-  "Pure Engineering roles (SWE, Backend, ML Engineer-IC unless customer-facing AI)",
-  "Pure Sales / Marketing / Operations roles",
-  "Entry-level or junior roles (under 5 years experience)",
-  "Located outside the EU, OR in the UK or Ireland"
-]
-```
-
-Why two forms: profiles without a typed `hard_exclusions` block fall back to `exclusion_rules`. New profiles generate `hard_exclusions` as the primary form. Free-text `exclusion_rules` is for nuanced judgment-call rules that still need LLM interpretation; structured types handle deterministic filters.
-
 Compile-write applies these first; matched jobs are dropped without scoring. Counts are reported in the run summary so the user can sanity-check the filter.
 
-### 7.3 The scoring algorithm (structured path)
+### 7.2 CV-grounded LLM scoring path
 
-```python
-score = sum(criteria[c].weight * partial(c, job) for c in criteria)
-score += sum(bonuses[b].weight * partial(b, job) for b in bonuses)
-score = max(0, min(score, max_score))   # floor 0, cap at max_score
-```
+The categorical Match column (High / Mid / Low) is the primary signal. The numeric Score column is reserved (always null) — kept in the schema only because removing a Notion property is awkward.
 
-Where `partial(c, job)` returns 0 (no match), 0.5 (partial), or 1 (full match).
-
-**Critical correctness rule:** the agent reads `criteria` + `bonuses` from `profile.json` and uses NO inline default rubric. Inline defaults would silently contradict what the user configured during setup.
-
-### 7.4 "Why Fits" rationale
-
-Each written row gets a 2-3 sentence explanation naming the criteria it scored on, with weights. The user reads this in the tracker to understand *why* each role surfaced — invaluable for tuning the rubric over time.
-
-### 7.5 CV-grounded LLM scoring path
-
-When `profile.cv_json` is present, compile-write switches to the LLM path. The categorical Match column (High / Mid / Low) is the primary signal; the numeric Score column is left null on this path.
-
-**Profile schema additions:**
+**Profile schema:**
 
 The wizard's free-text background answer (stored as `profile.context`) serves as the narrative — wants/avoids/aspirations/target patterns. The LLM scoring path reads `profile.context` as the candidate intent.
 
@@ -463,9 +403,7 @@ The wizard's free-text background answer (stored as `profile.context`) serves as
 
 **Cost framing:** ~$20–50/run on Opus with extended thinking (typical run, ~200 candidates surviving hard exclusions). ~$5–15/run if overridden to Sonnet. ~$1–2/run on Haiku, with degraded rationale quality. Anthropic prompt caching is mandatory for the constant profile section — N-1 cache hits per run amortize the per-call cost. Run summary prints aggregate token usage + cost estimate per pass.
 
-**Backward compat:** profiles without `cv_json` use the structured-rubric path documented in §7.1–§7.4.
-
-### 7.6 Feedback-recycle learning loop (Pass 6)
+### 7.3 Feedback-recycle learning loop (Pass 6)
 
 The LLM path becomes a learning loop via the `jobs-recycle-feedback` skill, auto-triggered as Pass 6 of the orchestrator (gated on cloud mode + `profile.cv_json` present + ≥7 days since last cycle).
 
@@ -565,11 +503,13 @@ If an agent crashes without writing the fallback file, the orchestrator's parser
 
 Considered but rejected: SQLite, Postgres, S3, GitHub-stored YAML.
 
-Notion wins because:
-- The user already has it (Forbes-AI-50 candidate audience overlaps strongly with Notion users).
-- The data has a usable read/edit UI for free — they edit profile/custom-companies in Notion the same way they edit any other Notion page.
-- The Notion API is straightforward, free, and has no rate-limit surprises at this scale.
-- Cloud Routines need durable storage; Notion provides it without any infra.
+Notion was chosen as the destination because:
+- **Low setup friction**: a free account + one integration token is enough to get started; no database/server provisioning, no schema migrations, no infra to maintain.
+- **Editable UI for free**: users can triage, label, and add notes directly in Notion's familiar block editor — no custom UI to build.
+- **JSON-in-page-body pattern**: profile and custom-companies live as JSON code blocks the user can edit in Notion's UI; richer than a hidden config file and discoverable next to the rest of the workspace's data.
+- **No vendor lock-in for the plugin**: the plugin repo stays generic; per-user data lives in the user's own Notion workspace, not in any backend the plugin operator runs.
+- **Workable for non-coders**: anyone comfortable with Notion (or willing to learn its block editor) can use the plugin without writing code.
+- **Stable, free API**: the Notion API is straightforward and has no rate-limit surprises at this scale; Cloud Routines need durable storage and Notion provides it without any infra.
 
 The trade-off: `rich_text` per-element 2000-char limit forced the multi-element-in-code-block hack for state. Worth it.
 
@@ -649,10 +589,10 @@ Stage 2 — Optional: Schedule a Cloud Routine    (one-time)
 
 Stage 3 — Ongoing                                (no-op for the user)
 ─────────────────────────────────────────────────────────────────────────
-  Every Monday at 08:00:
+  Each Routine fire (or other trigger):
     ├─ Routine container fires
     ├─ Setup script creates sentinel + verifies auth
-    ├─ Plugin runs the 6-pass pipeline (~60-90s; Pass 6 fires weekly)
+    ├─ Plugin runs the 6-pass pipeline (~60-90s; Pass 6 gates on 7-day cadence)
     ├─ New qualifying jobs land in Tracker DB
     ├─ Hot-list digest page created with the week's matches
     ├─ jobs-recycle-feedback (when gate met) updates profile from labels

@@ -415,10 +415,9 @@ def _resolve_parent(parent_id: str, parent_type: str) -> dict:
 def _summarise_properties(props: dict) -> dict:
     """Compact summary of a Notion page's properties.
 
-    Pre-v3.0.3 omitted rich_text/checkbox/multi_select for brevity, which broke
-    feedback-recycle: it needs Feedback Comment (rich_text), Key Factors
-    (rich_text), Recycled (checkbox), Match Quality (select). The "for brevity"
-    rationale predated v3 schemas where those fields are load-bearing.
+    Includes rich_text / checkbox / multi_select / select fields — feedback-recycle
+    needs Feedback Comment (rich_text), Key Factors (rich_text), Recycled
+    (checkbox), Match Quality (select), so the summary preserves them all.
     """
     summary = {}
     for name, val in props.items():
@@ -457,11 +456,9 @@ def cmd_update_page(args, token):
         payload["properties"] = pack_properties(props_in)
     if args.archive:
         payload["archived"] = True
-    # Pre-v3.0.4 the guard rejected `update-page --replace-content` without
-    # `--properties` because it only checked `payload`. But --replace-content
-    # is a content-only update (delete children + append new blocks) that
-    # doesn't need a PATCH /pages call at all. Now: accept any of the three
-    # update modes, skip the PATCH if only --replace-content was requested.
+    # `--replace-content` is a content-only update (delete children + append
+    # new blocks) that doesn't need a PATCH /pages call at all. Accept any of
+    # the three update modes; skip the PATCH if only --replace-content was set.
     if not payload and not args.replace_content:
         print(json.dumps({"error": "nothing to update — pass --properties, --replace-content, or --archive"}), file=sys.stderr)
         sys.exit(3)

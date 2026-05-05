@@ -1,6 +1,6 @@
 {
   "_comment": "Notion property schema for the Job Tracker database. Used by setup wizard to create the DB; ALSO used by run-job-search Step P-3 to recreate the DB if it goes missing. Keep this single source of truth — do NOT inline the schema as DDL pseudocode anywhere else.",
-  "_v3_note": "v3.0 introduces Match (categorical) + Key Factors columns alongside the legacy Score. Both forms coexist: profiles without cv_json use legacy structured-rubric scoring (writes Score + Why Fits); v3 profiles use LLM-judged categorical (writes Match + Why Fits + Key Factors, sets Score=null). Why Fits carries the rationale text in both paths — the v1.0.1 cleanup dropped a parallel Reasoning column that was redundant. Match Quality + Feedback Comment columns ship for the learning loop.",
+  "_scoring_note": "Match (High/Mid/Low) is the primary signal. Why Fits carries the rationale text; Key Factors carries the bulleted match/concern/gap evidence. Score is reserved (null) — present in the schema only because Notion DBs can't drop a property without affecting the parent. Match Quality + Feedback Comment + Recycled support the learning loop (see jobs-recycle-feedback).",
 
   "Title":            {"title": {}},
   "Company":          {"rich_text": {}},

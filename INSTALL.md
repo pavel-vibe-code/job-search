@@ -16,7 +16,7 @@ Both styles support local interactive use AND scheduled Cloud Routines. They dif
 | Requirement | Why |
 |---|---|
 | Claude Code installed (CLI, desktop app, or claude.ai/code) | Plugin runtime |
-| Notion account | The plugin's data lives there |
+| Notion account (free at notion.so) | The plugin uses Notion as its data layer; no prior Notion experience needed |
 | Python 3 (always present on macOS / most Linux) | Helper scripts run in the plugin |
 | GitHub account | Required for Advanced (to fork); useful for Quick (Routine on private upstream forks needs auth) |
 
@@ -227,7 +227,7 @@ Wildcards are allowed in the Routine UI's domains field.
 |---|---|
 | `api.notion.com` | All Notion reads + writes |
 | `*.ashbyhq.com`, `*.greenhouse.io`, `*.lever.co`, `*.comeet.com`, `*.teamtailor.com`, `*.homerun.co` | The 6 supported deterministic ATS APIs. Greenhouse wildcard covers EU subdomain (`job-boards.eu.greenhouse.io`). |
-| `surgehq.ai` | Surge AI baseline (legacy v2.x; rarely hits — fine to leave) |
+| `surgehq.ai` | Surge AI baseline (rarely hits — fine to leave or omit) |
 
 > **No `api.anthropic.com` in the allowlist.** All LLM work runs through Claude Code agents (Pass 3 compile-write, Pass 5 notify-hot, Pass 6 jobs-recycle-feedback, and the scrape-extract agent for any company tagged `ats: scrape`). Agents bill against your Claude.ai subscription — they do not make outbound HTTPS calls to `api.anthropic.com` from inside the container.
 
@@ -315,7 +315,7 @@ The Routine fires on its schedule with no further action needed. Things to do pe
 
 - **Rotate the Notion token** every few months. Mint a new one, paste it into the Routine environment, revoke the old one at notion.so/profile/integrations.
 - **Review the tracker**. New rows have `Status = "New"`. Update to `Reviewed / Applied / Not interested` as you triage.
-- **Tune scoring** by editing the AI 50 Profile Notion page. For CV-grounded categorical scoring (default) edit the `criteria` array and re-run; for legacy structured rubric, increase/decrease weights as needed. To override the model used for scoring, set `profile.scoring.model: "claude-sonnet-4-6"` (cuts subscription quota use ~75%; quality drop is usually small for clear-fit candidates).
+- **Tune scoring** by editing the AI 50 Profile Notion page (or use `jobs-settings` for guided field-by-field editing). To override the model used for scoring, set `profile.scoring.model: "claude-sonnet-4-6"` (cuts subscription quota use ~75%; quality drop is usually small for clear-fit candidates).
 - **Extend the company list** with the `jobs-extend-companies` skill — type `extend companies` in Claude Code and use the dialogue-based flow to add (paste careers URL → ATS auto-detected), remove, update, list, or clean up `ats: skip` entries. No JSON editing required.
 - **Preview a careers page** with the `jobs-scrape-page` skill — type `scrape this page: <url>` to test extraction quality before committing to track a company on a custom careers page.
 - **Recycle feedback weekly.** After labeling tracker rows with Match Quality + Feedback Comment, the next Routine run auto-triggers `jobs-recycle-feedback` (gated to once per 7 days) which folds your labels into next week's scoring prompt. To trigger manually, type `recycle feedback`.
@@ -388,7 +388,7 @@ Check the Routine logs. Most common causes:
 
 ### State drift (jobs missing from tracker but marked "seen" in state DB)
 
-Pre-v2.3 behavior on compile-write failures. v2.3+ has the un-poisoning fallback handler. If you're on v2.3+ and seeing this: check `outputs/<date>-tracker-fallback.md` — your missing rows are there, and the next run will retry them.
+Indicates compile-write failed mid-write. The orchestrator's un-poisoning handler covers this: check `outputs/<date>-tracker-fallback.md` — your missing rows are there, and the next run will retry them.
 
 ### Help
 

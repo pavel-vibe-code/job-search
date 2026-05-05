@@ -32,7 +32,7 @@
 
     "_mcp_tools_note": "MCP tools used by this plugin when auth_method='mcp': notion-search, notion-fetch, notion-create-pages, notion-update-page, notion-create-database. Final tool name = mcp_tool_prefix + tool-name.",
 
-    "_legacy_id_fields_note": "v2.2.x and earlier wrote tracker_database_id, hot_list_parent_page_id, etc. directly into this file. v2.3.x moved these to state/cached-ids.json so the plugin repo stays generic and shareable. If you have legacy ID fields here, the runtime ignores them — discover.py reads from state/cached-ids.json instead."
+    "_id_fields_note": "Per-user Notion artifact IDs live in state/cached-ids.json (gitignored), not in this file. This file ships generic; the runtime resolves IDs by name via notion-api.py discover."
   },
 
   "google_docs": {

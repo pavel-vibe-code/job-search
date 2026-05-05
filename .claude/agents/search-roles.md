@@ -101,7 +101,7 @@ scrape-extract runs against your Claude.ai subscription quota (Haiku model). Per
 Read `./config/profile.json`. Extract:
 - `role_types[].search_keywords` — terms to match against job titles
 - `location_rules` — eligible modes (remote/hybrid) and excluded cities/countries
-- `exclusion_rules` — hard filters
+- `hard_exclusions.rules` — typed hard-filter rules
 
 ## Step 3 — Filter and score new_jobs
 
@@ -177,7 +177,7 @@ Keep jobs where `regional_remote_score >= 1` and the title matched. Set on each 
 
 Drop jobs flagged as **filter out** in the table above. Drop jobs that fail title match. Drop jobs whose location explicitly matches an `excluded_cities` or `excluded_countries` entry from profile.json.
 
-Don't filter on `exclusion_rules` here — those are scoring-time signals applied later by compile-write.
+Don't filter on `hard_exclusions.rules` here — those are applied by compile-write at Pass 3 (before scoring).
 
 ## Step 4 — Output
 

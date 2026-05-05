@@ -243,7 +243,7 @@ Write the `candidates` array from Pass 1 to a file (e.g. `/tmp/pass2-candidates.
 
 **Why this matters (historical bug, fixed v3.0.6).** Earlier versions of `validate-jobs.py` hardcoded its index source to `plugin_root/config/{companies,custom-companies}.json`. In cloud mode that's the **shipped template** (generic baseline). The user's actual custom-tracked companies live in Notion, hydrated to `/tmp/custom-companies.json` by P-4. Pass 1 used the hydrated data; Pass 2 silently used the template; custom-tracked companies (Parloa, Nebius, JetBrains, Make, etc.) became `company_name_not_in_index` in Pass 2 even though Pass 1 happily fetched their jobs. v3.0.6 made the file paths explicit args; orchestrator passes the same paths to both passes.
 
-**Why uncertains now get written (v2.5.2):** Pre-v2.5.2, uncertains were dropped at this boundary — only `live` went forward. But Pass 4 still persisted their job IDs to state, which meant the next run's diff treated them as "seen" and they were silently consumed. User never saw them. Now uncertains travel with live to compile-write and land in the tracker with a distinct status, preserving review opportunity.
+**Why uncertains get written (not dropped):** if uncertains were silently dropped at this boundary, Pass 4 would still persist their job IDs to state, the next run's diff would treat them as "seen", and they'd be silently consumed without ever reaching the user. So uncertains travel alongside live to compile-write and land in the tracker with a distinct `Status: Uncertain`, preserving review opportunity.
 
 The agent uses an **API-based validator** (`scripts/validate-jobs.py`) that queries each ATS's posting API directly — same endpoints `fetch-and-diff.py` uses to enumerate jobs. This replaces v2.2.0's WebFetch + HTML closure-signal approach, which produced ~65% false-negatives on SPA-rendered ATS (Ashby, Lever) because non-JS clients see only an empty shell.
 
@@ -274,7 +274,7 @@ Other paths (passed inline):
 The orchestrator MUST pass `auth_method` explicitly in the prompt so the agent does not need to infer it from `connectors.json` (which may show `null` in a Routine cold-start). See the read-only note in P-1.
 
 Prompt:
-> "Score each candidate using the profile rubric (max_score, criteria, bonuses, exclusion_rules from profile.json — see agents/compile-write.md Step 3 for the algorithm). Apply hard exclusions FIRST (see Step 2). Write qualifying live jobs with `Status: New`. Write uncertains that pass hard exclusions with `Status: Uncertain` (no scoring required for uncertains — user triages in Notion). Mark removed_jobs as Closed. Return newly written jobs (live AND uncertain).
+> "Score each candidate using the CV-grounded scoring path (cv_json + scoring.instructions from profile.json — see agents/compile-write.md Step 3 for the algorithm). Apply hard exclusions FIRST (see Step 2). Write qualifying live jobs (verdict ∈ {High, Mid}, plus Low if profile.scoring.show_low) with `Status: New`. Write uncertains that pass hard exclusions with `Status: Uncertain` (no scoring required for uncertains — user triages in Notion). Mark removed_jobs as Closed. Return newly written jobs (live AND uncertain).
 >
 > Notion writes: auth_method is **{auth_method}** (passed explicitly — do not re-read from connectors.json). Use scripts/notion-api.py for api_token, or mcp_tool_prefix **{mcp_tool_prefix}** for mcp. On Notion write failure, do NOT fall back to markdown silently — abort and report. The orchestrator decides fallback strategy."
 
@@ -399,7 +399,7 @@ Prompt:
 >
 > On Notion-create failure: abort and report; do NOT silently fall back to markdown. The orchestrator handles fallback."
 
-**Empty-run skip (v3.4.0+):** if newly written jobs list is empty AND no static notifications AND no external companies: still invoke notify-hot, but expect it to return `{"hot_matches": 0, "document_created": false, "connector_status": "skipped_empty"}`. Do NOT create a digest page in that case — log "no hot matches this run" inline in the run summary instead. Pre-v3.4.0 behavior was to create an empty digest page every run; that junked the user's Notion with ~52 empty pages/year.
+**Empty-run skip:** if newly written jobs list is empty AND no static notifications AND no external companies: still invoke notify-hot, but expect it to return `{"hot_matches": 0, "document_created": false, "connector_status": "skipped_empty"}`. Do NOT create a digest page in that case — log "no hot matches this run" inline in the run summary instead. (Without this skip, pipeline fires on slow weeks would junk the Notion sidebar with empty digest pages.)
 
 **Failure handling — markdown fallback contract:** if notify-hot's response contains `{"error": ..., "fallback_file": "/tmp/notify-hot-failed.json"}` (see `agents/notify-hot.md` § Failure contract):
 
@@ -421,7 +421,7 @@ After Pass 5 completes successfully, optionally invoke the **jobs-recycle-feedba
 # Only run Pass 6 if all conditions are met
 should_recycle = (
     deployment_mode == "cloud"  # local users invoke manually when ready
-    and profile_has_cv_json     # legacy profiles use structured rubric, no recycle
+    and profile_has_cv_json     # cv_json must be present for the recycle to have signal to learn from
     and (last_recycle_age_days >= 7 or last_recycle_missing)  # don't recycle every fire
 )
 ```
@@ -450,7 +450,7 @@ Validation: {N} live confirmed (of {N} checked)
 Tracker: {N} new entries written | {N} marked closed
 State: {Notion DB ✓ | local file ✓}
 
-🔥 Hot matches ({N} at score ≥ {threshold} OR Match: High in v3 path):
+🔥 Hot matches ({N} at Match: High):
   • {Score or Match} — {Company}: {Title} [{location}]
 
 Hot list: {Notion page URL or file path}
@@ -493,7 +493,7 @@ Cost formula per pass: `(input_tokens - cache_read_input_tokens) × input_rate +
 
 Sum across passes for total run cost. Round to 2 decimal places in display.
 
-If a pass returns `usage: null` (e.g. notify-hot in legacy path that just renders templates without LLM calls): omit it from the breakdown and skip it in the aggregate.
+If a pass returns `usage: null` (e.g. notify-hot when it only renders templates without LLM calls): omit it from the breakdown and skip it in the aggregate.
 
 If `usage` is missing entirely from a pass response (older agent format): omit that pass's row entirely from the display rather than printing partial/garbled output. Don't print version stamps inline — they confuse the user-facing summary.
 

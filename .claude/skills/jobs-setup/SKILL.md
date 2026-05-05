@@ -187,28 +187,29 @@ Store the full answer verbatim as `"context"` in profile.json. This field has no
 
 ---
 
-## Step 3.5 — CV / LinkedIn upload (v3.0+, optional)
+## Step 3.5 — CV / LinkedIn upload (required)
 
 Print:
 
 ```
-Optional but strongly recommended: upload your CV or LinkedIn profile
-('Save to PDF' export) so the scoring system has substance to match against.
+Upload your CV or LinkedIn profile ('Save to PDF' export). The scoring
+system uses this as the substantive grounding for every tracker verdict —
+each entry will show which of your actual experiences match the JD and
+which are gaps.
 
-How this changes the scoring:
-  • WITH CV  → LLM-judged categorical (High / Mid / Low) match against your
-               actual experience. Each tracker entry shows exactly which
-               profile attributes the JD addresses (and which are gaps).
-  • WITHOUT  → Structured rubric scoring (criteria × weights). Numeric
-               score 0-N. Rubric must be tuned manually — less nuanced.
-
-Paste a path to your PDF, or press Enter to skip.
-(Examples:
-  /Users/me/Documents/cv-2026.pdf
-  ~/Downloads/Linkedin-Profile.pdf)
+Either:
+  - Paste a file path to a PDF
+    (e.g. /Users/me/Documents/cv-2026.pdf or ~/Downloads/Linkedin-Profile.pdf)
+  - Or paste your CV/LinkedIn text directly (start typing, end with a blank line)
 ```
 
-If user skips: continue to Step 4 with no `cv_json` in profile (legacy structured-rubric path will be used).
+Wait for input. CV is mandatory — without it, the scoring system has no
+substance to match against. If the user truly resists, explain again and
+ask: *"A CV is required for the plugin to score jobs against your profile.
+Without one, every job would just match against your free-form context
+paragraph (sparse signal). Try a quick PDF export from LinkedIn (~10 sec)
+or paste any text version of your work history. Even a partial CV beats
+none."*
 
 If user provides a path:
 
@@ -258,109 +259,31 @@ If user provides a path:
 
 5. **Store as `profile.cv_json`** in memory; written to profile during Step 6.
 
-**If PDF read fails** (corrupt, password-protected, etc.): fall back to skip path. Tell the user *"Couldn't read that PDF. You can try again with a different file or skip — without a CV, the scoring system uses the structured-rubric fallback path."*
-
-**Sets the scoring path for this profile:** if `cv_json` is captured here, Step 4 (scoring rubric) becomes simpler — only collect optional `scoring.instructions` free-text hints; skip the criteria + weights elicitation. If `cv_json` is skipped, Step 4 runs as documented (criteria + bonuses + thresholds).
+**If PDF read fails** (corrupt, password-protected, etc.): tell the user *"Couldn't read that PDF. Try a different file (e.g. re-export from LinkedIn), or paste your CV text directly."* Do NOT proceed without a CV.
 
 ---
 
-## Step 4 — Scoring rubric
+## Step 4 — Scoring instructions (optional hint to the LLM)
 
-> **Two paths depending on whether Step 3.5 captured a `cv_json`:**
->
-> - **v3 path** (cv_json present): skip the criteria/weights collection. Optionally ask: *"Any scoring hints you want to give the LLM? E.g. 'be strict on AI-native vs. AI-bolt-on', 'reward customer-facing leadership over IC roles'. Press Enter to skip — the LLM will infer from your CV + narrative directly."* Store the response (or empty string) as `profile.scoring.instructions`. Skip 4a/4b/4c below.
-> - **Legacy path** (no cv_json): run the full criteria + weights elicitation in 4a/4b/4c below.
+Now that the CV is captured, scoring is grounded in the structured cv_json
+plus your free-form context paragraph from Step 3. The LLM-judged categorical
+verdict (High / Mid / Low) emerges from those two — no manual rubric needed.
 
-Two interactive sub-steps: (a) collect criteria + priorities from the user in plain English, then (b) propose a weighted rubric with thresholds for the user to approve/adjust.
-
-### Step 4a — Collect criteria + priorities
-
-Print:
+Optionally ask:
 
 ```
-Now let's set up scoring. Tell me what matters in a job — plain English,
-one criterion per line, each tagged with a priority (high / medium / low).
-
-For each, briefly say WHY it's at that priority — that helps me weight
-them sensibly. The 'why' is optional but useful.
+Any scoring hints you want to give the LLM? Free-form, 1-2 sentences max.
 
 Examples:
-  • Seniority match (Director/VP, 10+ years): high — non-negotiable
-  • Location fit (Prague hybrid OR EU-remote, no country lock): high
-  • Role-type alignment: high
-  • AI-native company: high — must be AI-first, not bolt-on
-  • Experience match: medium
-  • Series B+ growth stage: medium
-  • Strong tech brand recognition: low
-  • Compensation transparency in posting: low — nice signal, not a filter
-
-Write as many as you want. Free-form.
+  - "Be strict on AI-native vs. AI-bolt-on; downgrade non-AI-core roles."
+  - "Reward customer-facing leadership over IC roles."
+  - "Cap any non-Berlin EU role at Mid — I prefer hybrid local."
+  - "" (skip — let the LLM infer entirely from CV + context)
 ```
 
-Wait for the user's response. Parse each line into:
-- `criterion`: short name (slug-like)
-- `label`: human-readable
-- `description`: one sentence
-- `priority`: "high" | "medium" | "low"
-- `rationale`: their "why" text (or empty string)
+Store the response (or empty string) as `profile.scoring.instructions`. The LLM uses this as a top-level steering hint when scoring; concise rules are best.
 
-### Step 4b — Reflect and propose
-
-Reflect on what the user wrote. Use these heuristics, but adjust based on the specific input:
-
-- **Default mapping:** `high → 2`, `medium → 1`, `low → bonus +1` (each bonus adds to ceiling but isn't required for a high score).
-- **Strong-language hint:** if a HIGH criterion's rationale uses words like "non-negotiable", "must", "required", consider lifting it out of the score and into `exclusion_rules` instead. Tell the user you're doing this and why.
-- **Single-HIGH case:** if there's only one HIGH criterion, it's the dominant signal — give it weight 3 instead of 2 so the score actually reflects fit.
-- **All-HIGH case:** if everything is HIGH, gently note that this means everything is equally important; either accept and use weight 2 across the board, or invite the user to differentiate — don't force the issue.
-- **Threshold proposal:** `minimum_score ≈ 50% of max` (rounded), `hot_score_threshold ≈ 75% of max` (rounded). Bonuses count toward the max but the percentages stay anchored to the core max for stability.
-
-Compute `max_score = sum of criteria weights + sum of bonus weights`.
-
-Print the proposal in this shape:
-
-```
-Got it. Here's my proposed rubric:
-
-{2-3 sentences explaining the reasoning — which criteria you grouped at
-which weight, whether you lifted any to exclusions, why bonuses got
-treated as bonuses, etc. Be specific about THIS user's input, not generic.}
-
-Proposed rubric:
-  Weight {N} — {Criterion 1 label}
-  Weight {N} — {Criterion 2 label}
-  ...
-  Bonus +{N} — {Bonus 1 label}
-  ...
-
-{If any were moved to exclusions:}
-Hard exclusion (moved out of scoring): {description}.
-
-Maximum score: {max_score}
-Recommended minimum_score = {min} (anything ≥ {min} saves to tracker)
-Recommended hot_score_threshold = {hot} (anything ≥ {hot} hits the digest)
-```
-
-### Step 4c — User decision
-
-Call `AskUserQuestion`:
-- Question: "How does this rubric look?"
-- Header: "Confirm rubric"
-- Options:
-  - label: "Approve", description: "Lock in the rubric and thresholds as proposed"
-  - label: "Adjust", description: "I'll describe changes in plain English; you re-propose"
-  - label: "Re-think it", description: "Same input, different weighting structure"
-
-**If "Approve":** lock in. The thresholds are already set — no further questions. Continue to Step 5.
-
-**If "Adjust":** ask "What would you like to change?" — accept free-form input, update the proposal accordingly, re-display, re-ask. Loop until they Approve or hit 3 adjustment cycles (then force them to Approve or Re-think to avoid endless tweaking).
-
-**If "Re-think":** propose a deliberately different weighting structure (e.g. switch from weighted-tiers to flat `2/1/0` if the first proposal was nuanced, or vice versa). Cap at 3 re-think attempts total before forcing Approve / Adjust.
-
-Store `_proposal_explanation` (the 2-3 sentence reasoning) in `profile.json[scoring]` for transparency. The runtime scorer ignores this field but it's useful for the user (and for you on future setup runs) to understand why the rubric is shaped this way.
-
-**Note for the wizard agent:** the user can always edit `profile.json[scoring]` directly afterward. This step is about a quick, personalised first pass — not about getting it perfect.
-
-**Cost framing (v3 path with CV upload):** scoring uses Claude Opus 4.7 with extended thinking (4000-token budget) by default — the highest-quality model for multi-criteria evaluation. Typical cost: **~$20–50 per Routine fire** (one fire/week → ~$80–200/month). To cut cost ~75% with a small quality drop, set `profile.scoring.model: "claude-sonnet-4-6"` directly in the profile JSON after setup (~$5–15/run). Mention this once at the end of setup so the user has the context; don't make it a wizard question (most users want the Opus default and the override is a one-line edit).
+**Cost framing (CV-grounded scoring):** the LLM-judged categorical scoring uses Claude Opus 4.7 with extended thinking (4000-token budget) by default — the highest-quality model for multi-criteria evaluation. Per pipeline run, expect on the order of subscription-quota use equivalent to **$20–50 in pay-per-token rates** for ~50 candidates. To cut quota usage ~75% with a small quality drop, the user can later edit their AI 50 Profile Notion page to add `"scoring.model": "claude-sonnet-4-6"`. Mention this at the end of setup so the user has the context; don't make it a wizard question (Opus is the right default for most users).
 
 ---
 
@@ -675,46 +598,11 @@ Build `profile.json` from all collected answers:
 
   "role_types": [{array of role type objects from Q4, confirmed by user}],
 
-  {if Step 3.5 captured a cv_json (v3 path), include it as a top-level field:}
-  "cv_json": {Step 3.5 extracted-and-confirmed CV JSON},
+  "cv_json": {Step 3.5 extracted-and-confirmed CV JSON — required},
 
   "scoring": {
-    {if v3 path: emit ONLY the optional instructions field, omit criteria/bonuses/thresholds:}
-    {"instructions": "{Step 4 v3-path's optional hint, or empty string}"}
-
-    {if legacy path: emit the full structured rubric:}
-    {"minimum_score": {from Step 4 proposal, approved by user},
-     "hot_score_threshold": {from Step 4 proposal, approved by user},
-     "max_score": {sum of criteria + bonus weights},
-     "criteria": {
-        "{criterion_id}": {
-          "weight": {N},
-          "label": "{human-readable}",
-          "priority": "high|medium|low",
-          "description": "{one sentence}",
-          "rationale": "{user's why, or empty}"
-        },
-        ...
-      },
-      "bonuses": {
-        "{bonus_id}": {
-          "weight": {N},
-          "label": "{human-readable}",
-          "priority": "{user's priority — typically 'low', but if the wizard's Adjust loop lifted a bonus to medium it stores 'medium' here}",
-          "description": "{one sentence}"
-        },
-        ...
-      },
-      "_proposal_explanation": "{the 2-3 sentence reasoning the agent gave when proposing this rubric}"
-    }
+    "instructions": "{Step 4's optional hint, or empty string}"
   },
-
-  "exclusion_rules": [
-    "Job explicitly requires fluency in a language not in candidate.spoken_languages",
-    {if Q3 implies on-site only in candidate's city: "Must not require on-site presence outside {city}"},
-    {any criteria the wizard moved out of scoring during Step 4b: "{exclusion description}"},
-    "Must not be entry-level or junior roles"
-  ],
 
   "hard_exclusions": {
     "schema_version": 1,

@@ -120,18 +120,13 @@ Read `./config/connectors.json` only for:
 
 ## Step 2 — Filter hot jobs
 
-**Hot definition depends on profile shape:**
+**Hot = entries with `Match: "High"`.** Order by `confidence` (high → first). No threshold tuning.
 
-- **v3 path (profile has `cv_json`):** Hot = entries with `Match: "High"`. No threshold tuning. Order by `confidence` (high → first).
-- **Legacy path (no `cv_json`):** Hot = entries where `fit_score >= hot_score_threshold`.
-
-**Empty-run skip (v3.4.0+):** If `len(hot_jobs) == 0` AND there are no static-roles notifications AND no external-companies entries to surface, **skip page creation**. Return `{"hot_matches": 0, "document_created": false, "document_url": null, "connector_status": "skipped_empty"}`. The orchestrator logs "no hot matches this run" inline. Rationale: weekly fires that produce zero hot matches would otherwise junk the user's Notion with empty digest pages.
+**Empty-run skip:** If `len(hot_jobs) == 0` AND there are no static-roles notifications AND no external-companies entries to surface, **skip page creation**. Return `{"hot_matches": 0, "document_created": false, "document_url": null, "connector_status": "skipped_empty"}`. The orchestrator logs "no hot matches this run" inline. Rationale: pipeline fires that produce zero hot matches would otherwise junk the Notion sidebar with empty digest pages.
 
 If hot jobs > 0, OR there ARE static notifications / external companies to surface (even with zero hot), proceed with Step 3 and create the digest.
 
 ## Step 3 — Format the digest
-
-**v3 path digest format:**
 
 ```
 🔥 Hot Jobs — {today's date}
@@ -141,7 +136,7 @@ Run: AI 50 + Favorites | {N} companies checked | {N} new jobs added | {N} High-b
 
 [High · confidence: {high|medium|low}] {Company} — {Job Title}
 📍 {Location}
-{Reasoning — 1-3 sentences from LLM rationale}
+{Why Fits — 1-3 sentences from LLM rationale}
 Key factors:
   • match: ...
   • match: ...
@@ -151,24 +146,6 @@ Key factors:
 ---
 
 [High · ...] ...
-```
-
-**Legacy path digest format:**
-
-```
-🔥 Hot Jobs — {today's date}
-Run: AI 50 + Favorites | {N} companies checked | {N} new jobs added | {N} hot matches
-
----
-
-[Score {score}] {Company} — {Job Title}
-📍 {Location} | 🏷 {role_type label}
-{Why Fits — 2-3 sentences}
-🔗 Apply: {URL}
-
----
-
-[Score {score}] ...
 ```
 
 Keep it tight — this is a quick-scan document, not a full analysis. Each entry should be readable in 10 seconds.
@@ -190,7 +167,7 @@ Return an envelope with summary fields AND token usage (v3.0.5+):
 
 ```json
 {
-  "hot_threshold_used":  {N or "High bucket (v3 path)"},
+  "hot_threshold_used":  "High bucket",
   "hot_matches":         {N},
   "hot_entries":         [{company, title, score_or_match, location}, ...],
   "document_url":        "...",
