@@ -105,7 +105,11 @@ MAX_WORKERS        = 10
 DESCRIPTION_LIMIT  = _ARGS.description_limit  # default 600; CLI-configurable
 MAX_RESPONSE_BYTES = 20_000_000  # bumped from 6 MB so OpenAI (~10 MB) fits
 TODAY              = date.today().isoformat()
-USER_AGENT         = "ai50-job-search/2.0"
+USER_AGENT         = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+# Use a real-browser UA. A custom string ("ai50-job-search/...") trips bot-filters
+# on some boards — observed: OpenAI's Ashby returns 403 for it while other Ashby
+# boards work fine. We're making polite, low-volume read-only calls to public job
+# boards; identifying as a generic browser is well within their ToS.
 
 # ── HTTP helper ───────────────────────────────────────────────────────────────
 

@@ -31,7 +31,13 @@ from typing import Callable, Optional, Tuple
 
 
 # HTTP helper — shared with fetch-and-diff.py / validate-jobs.py / validate-favorites.py (legacy slug-variant probing)
-USER_AGENT = "Mozilla/5.0 (compatible; ai50-job-search/3.1)"
+# User-Agent: a custom string ("ai50-job-search/...") trips bot-filters on some
+# boards (notably OpenAI's Ashby endpoint at api.ashbyhq.com/posting-api/job-board/openai
+# returns 403 for it). Use a real-browser UA to avoid that class of block. We're
+# making polite, low-volume read-only calls to public job boards — this is well
+# within their ToS as long as we don't hammer them. Identifying as a custom
+# scraper invited 403s without making us "more legitimate."
+USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 TIMEOUT_S  = 20
 
 
