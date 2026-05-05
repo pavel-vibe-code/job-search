@@ -42,7 +42,7 @@ Query the tracker for entries where:
 - `Match Quality` is set (i.e. user labeled it)
 - `Recycled` is unchecked (i.e. we haven't processed this label yet)
 
-Use `notion-api.py query-database --filter` (api_token mode) or `notion-search` (mcp mode). The query returns a `properties_summary` for each row that includes ALL relevant property types — `rich_text` (Feedback Comment, Key Factors, Reasoning), `checkbox` (Recycled), `select` (Match, Match Quality, Status). Pre-v3.0.3 versions stripped rich_text/checkbox/multi_select "for brevity" — that's been fixed; if you're invoking this skill on an older script, you'll need to either upgrade or do a custom property query.
+Use `notion-api.py query-database --filter` (api_token mode) or `notion-search` (mcp mode). The query returns a `properties_summary` for each row that includes ALL relevant property types — `rich_text` (Feedback Comment, Key Factors, Why Fits), `checkbox` (Recycled), `select` (Match, Match Quality, Status). Pre-v3.0.3 versions stripped rich_text/checkbox/multi_select "for brevity" — that's been fixed; if you're invoking this skill on an older script, you'll need to either upgrade or do a custom property query.
 
 If zero results: print *"No new feedback to recycle. Run when you've labeled some entries in the tracker."* and exit.
 

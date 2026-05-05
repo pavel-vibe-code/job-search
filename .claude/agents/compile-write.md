@@ -362,13 +362,14 @@ Write a 2–3 sentence **"Why Fits"** for each qualifying job that names which c
 
 ### REQUIRED v3 path writes (do not skip)
 
-When writing v3-path entries (profile has `cv_json` → categorical scoring), every page MUST include all three rationale fields:
+When writing v3-path entries (profile has `cv_json` → categorical scoring), every page MUST include both rationale fields:
 
-- **`Why Fits`** — the `rationale` text from the scoring response (back-compat with legacy filters)
-- **`Reasoning`** — the SAME `rationale` text (v3-canonical column; reports + feedback-recycle look here)
+- **`Why Fits`** — the `rationale` text from the scoring response (1–3 sentences explaining the verdict)
 - **`Key Factors`** — the `key_factors` array joined as one bulleted line per element. Preserve the `match:` / `concern:` / `gap:` prefix on each line. Example: `"match: AI-native B2B SaaS\nconcern: 30%+ travel\ngap: no fintech background"` (literal `\n` newlines between bullets).
 
-These are NOT optional and NOT conditional. A v3 write that populates `Why Fits` but leaves `Reasoning` or `Key Factors` empty is a bug — the user-facing tracker becomes useless for triage (no visible rationale alongside the verdict). If the LLM response is missing `rationale` or `key_factors`, that's a parse failure: log it and assign a placeholder rationale ("LLM response incomplete; spot-check this entry") rather than skipping the field.
+These are NOT optional. A v3 write that populates `Why Fits` but leaves `Key Factors` empty (or vice versa) is a bug — the user-facing tracker becomes useless for triage. If the LLM response is missing `rationale` or `key_factors`, that's a parse failure: log it and assign a placeholder rationale ("LLM response incomplete; spot-check this entry") rather than skipping the field.
+
+> **Note (v1.0.1):** Earlier prompts described a parallel `Reasoning` column carrying the same content as `Why Fits`. That column was removed in v1.0.1 cleanup — it was redundant and led to agents writing one but not the other. Single source: `Why Fits` carries the rationale; `Key Factors` carries the bulleted evidence list.
 
 **Eligibility for write:**
 - v3 path: by default, write candidates with `verdict in ("High", "Mid")` — Low entries are dropped (don't bloat tracker with rejections; they're documented in run summary count).
@@ -392,8 +393,7 @@ Create a new page per qualifying job. **Schema must match what the wizard create
 | `Department`  | rich_text | Department string                                   | Department string                                |
 | `Source`      | rich_text | `"ai50"` / `"custom"`                                | `"ai50"` / `"custom"`                            |
 | `Date Added`  | date      | Today, ISO 8601                                     | Today, ISO 8601                                  |
-| `Why Fits`    | rich_text | LLM rationale (back-compat — same content as Reasoning) | 2-3 sentence rubric rationale                |
-| `Reasoning`   | rich_text | LLM rationale (1-3 sentences, why this verdict)     | (omit — null in legacy path)                     |
+| `Why Fits`    | rich_text | LLM rationale (1-3 sentences, why this verdict)     | 2-3 sentence rubric rationale                    |
 | `Key Factors` | rich_text | Bulleted match: / concern: / gap: lines (one per line) | (omit — null in legacy path)                  |
 
 When using `notion-api.py create-pages`, the helper's `pack_properties` heuristic accepts a flat `{name: value}` shape; pre-built nested objects (like `{"Status": {"select": {"name": "New"}}}`) pass through unchanged.
@@ -413,14 +413,13 @@ When using `notion-api.py create-pages`, the helper's `pack_properties` heuristi
     "Source":      "ai50",
     "date:Date Added:start": "2026-05-05",
     "Why Fits":    "Director-level CX leadership at AI-native foundation-model lab. Job calls out scaling enterprise support orgs from 0→1, which matches your Series-B-stage operator profile. Concern: 30%+ travel may conflict with Prague-based remote preference.",
-    "Reasoning":   "Director-level CX leadership at AI-native foundation-model lab. Job calls out scaling enterprise support orgs from 0→1, which matches your Series-B-stage operator profile. Concern: 30%+ travel may conflict with Prague-based remote preference.",
     "Key Factors": "match: 'Director, Customer Experience' ↔ role_types[CX leadership]\nmatch: 'AI-native foundation-model lab' ↔ profile[AI-native preference]\nmatch: '0→1 scaling enterprise support' ↔ profile[scale-up experience]\nconcern: '30%+ travel required' ↔ profile.location_rules[remote-EU preference]"
   },
   "content": ""
 }
 ```
 
-Note: `Why Fits` and `Reasoning` carry **identical** content (the `rationale` from the scoring response). `Key Factors` is the `key_factors` array joined with `\n`, prefixes preserved. **Do not collapse the three fields to one** — populate all three, even though Why Fits and Reasoning are duplicates. Why Fits exists for legacy filters; Reasoning is the canonical v3 column.
+Note: `Why Fits` carries the rationale text (the `rationale` from the scoring response). `Key Factors` is the `key_factors` array joined with `\n`, prefixes preserved. Both fields are required.
 
 `connector_type` is hard-pinned to `"notion"` for production runs. Markdown output is NOT a branch this agent takes — the orchestrator drives the markdown fallback by reading `/tmp/compile-write-failed.json` (see "Failure contract" above) when this agent aborts on Notion errors.
 
