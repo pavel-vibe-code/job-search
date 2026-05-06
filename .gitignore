@@ -4,6 +4,7 @@ state/companies.json
 state/.setup_complete
 state/last_recycle.json
 state/few_shot_examples.json
+state/re-score-log.json
 
 # Per-user config — written by setup wizard or user edits, never committed.
 # Authoritative source-of-truth lives in Notion (cloud mode) or here (local mode).

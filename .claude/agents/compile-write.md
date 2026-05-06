@@ -25,6 +25,23 @@ You handle both sides of the tracker delta: writing new qualifying jobs and mark
 
 This agent intentionally does NOT declare a `tools:` allowlist in its frontmatter. A hardcoded `mcp__notion__*` allowlist breaks silently when Notion is installed via the Connectors UI (which assigns a UUID-based server-id, not the literal `notion`). Without the allowlist this agent inherits whatever the parent orchestrator has, and dispatches through the `notion_call` abstraction below.
 
+### Scoring discipline — IMPORTANT
+
+This agent does NOT make Anthropic API calls directly. Scoring happens via parallel sub-agent dispatch (Step 3 below) — each sub-agent reasons in its own context. **You (compile-write) are the orchestrator of Pass 3, not the LLM doing the per-candidate scoring.**
+
+**Do NOT:**
+- `import anthropic` or use the Python Anthropic SDK
+- Call `api.anthropic.com` directly via urllib / curl / requests
+- Ask for an `ANTHROPIC_API_KEY` — none is needed; agents run on Claude as substrate
+- Spawn a Python subprocess to do scoring
+
+**Do:**
+- Use the `Agent` tool to dispatch parallel `score-batch` sub-agents (Step 3)
+- Use `Bash` only for `notion-api.py` calls (the `notion_call` dispatch below) and `/tmp/` file I/O
+- Use `Read` / `Write` for batch input/output files
+
+If you find yourself thinking "let me call the Anthropic API to score" — STOP. Dispatch `score-batch` sub-agents instead.
+
 ### `notion_call` — the dispatch abstraction
 
 `auth_method` MUST be passed explicitly by the orchestrator in the prompt (see jobs-run SKILL.md Pass 3 inputs). Do **not** read it from `connectors.json[notion.auth_method]` — that field may be `null` in a Routine cold-start (shipped template value). If `auth_method` is absent from the prompt, abort and ask the orchestrator to re-invoke with it set. There are two transports; both expose the same conceptual operations.
@@ -183,9 +200,91 @@ If `hard_exclusions.rules` is missing, empty, or has `schema_version` not equal 
 
 ## Step 3 — Score the survivors
 
-For each survivor, build a single LLM scoring prompt and parse the response. **Evidence-grounded reasoning is mandatory**: every match/concern/gap must cite a specific JD passage AND a specific profile field — surface keyword overlap is not enough. Bucket assignment must be defensible from the cited evidence.
+**Architecture: parallel batched scoring via `score-batch` sub-agents.**
 
-The prompt structure:
+After Step 2's hard exclusions, the survivors are scored by a fleet of parallel `score-batch` sub-agents — each handles ~10 candidates in its own fresh context. This gives:
+
+- **~4–6× wall-clock throughput** vs sequential per-candidate scoring (a single agent processing 50+ candidates one-at-a-time fights context-window bloat)
+- **Sharper rationales per candidate** — each sub-agent only reads its 10 + the profile, so attention stays focused
+- **No SDK / API key needed** — sub-agents reason in their own contexts (same as you)
+
+### Step 3a — Split survivors into batches
+
+```python
+BATCH_SIZE = 10  # adjust if survivors > ~80 (cap dispatch fanout at ~8 sub-agents)
+batches = [survivors[i:i + BATCH_SIZE] for i in range(0, len(survivors), BATCH_SIZE)]
+```
+
+For each batch, write its input file:
+
+```
+/tmp/score-batch-1-input.json
+/tmp/score-batch-2-input.json
+...
+```
+
+Each input file has the schema documented in `.claude/agents/score-batch.md`:
+
+```json
+{
+  "batch_id": "1",
+  "profile":  { context, cv_json, scoring: {instructions}, candidate: {spoken_languages} },
+  "candidates": [ ... batch's ~10 candidates with full description ... ],
+  "few_shot_examples": [ ... when available, from feedback-recycle's last cycle ... ]
+}
+```
+
+### Step 3b — Dispatch sub-agents in parallel
+
+In a **single tool-use block**, invoke N `score-batch` sub-agents concurrently. Each gets:
+- Its input file path
+- Its output file path
+
+Example dispatch (compose all calls into ONE message so they run truly concurrent — DON'T sequentially await each one):
+
+```
+Agent(score-batch, prompt: "Score the batch at /tmp/score-batch-1-input.json. Write results to /tmp/score-batch-1-result.json.")
+Agent(score-batch, prompt: "Score the batch at /tmp/score-batch-2-input.json. Write results to /tmp/score-batch-2-result.json.")
+... (up to N parallel calls in one tool-use block) ...
+```
+
+### Step 3c — Aggregate results
+
+Once all sub-agents return, read each output file and merge:
+
+```python
+all_results = []
+for batch_id in range(1, N + 1):
+    with open(f"/tmp/score-batch-{batch_id}-result.json") as f:
+        all_results.extend(json.load(f)["results"])
+```
+
+Each result has `{url, verdict, rationale, key_factors, confidence}` — these are the verdict objects you write to the tracker in Step 4.
+
+### Step 3d — Reasoning discipline (passed through to score-batch)
+
+The full scoring prompt — JD decomposition, evidence-grounded factors, verdict bucket criteria — lives in `.claude/agents/score-batch.md`. You don't need to inline it here; the sub-agent reads its own canonical reference. The contract you guarantee:
+
+- **Evidence-grounded reasoning is mandatory**: every match/concern/gap must cite a specific JD passage AND a specific profile field — surface keyword overlap is not enough.
+- **Categorical decisions are sticky** (treat as `temperature=0`): same JD + profile should yield the same verdict run-to-run.
+- **Sparse JDs default to Mid**: under ~3 substantive requirements → confidence is too low for High.
+- **Critical concerns downgrade aggressively** from pure match counting.
+
+### Why this beats sequential per-candidate scoring
+
+The original design had a single agent loop through all N candidates in one context. Two issues:
+1. Context-window degradation: by candidate 30+ in a 50-candidate run, attention quality drops.
+2. No parallelism: wall-clock = N × per-candidate latency.
+
+Parallel batching trades a small token-overhead increase (each sub-agent loads the profile fresh — though Claude's auto-prompt-caching reduces this) for ~4–6× throughput AND consistent per-candidate quality.
+
+---
+
+## Step 3 reference — the canonical scoring prompt
+
+This is the prompt structure score-batch follows. Documented here so compile-write's reader has a complete picture of what scoring looks like; the actual execution lives in score-batch.
+
+```
 
 ```
 You are scoring a job listing against a candidate's profile and CV. Your goal:
@@ -307,19 +406,15 @@ Step 5 — Output JSON only:
 }
 ```
 
-**Implementation guidance:**
+**Implementation notes:**
 
-- **Default model: Claude Opus 4.7 (`claude-opus-4-7`)** — strongest reasoning + nuance. Significantly better than Sonnet at multi-criteria evaluation. Cost is meaningfully higher (~5x per call vs Sonnet) but with prompt-caching of the constant profile section, marginal cost on calls 2-N amortizes well.
-- **Enable extended thinking** for each scoring call — this is what makes the JD-requirements decomposition robust. Use `thinking: {type: "enabled", budget_tokens: 4000}` (or similar — adjust based on JD length and complexity).
-- **Override via `profile.scoring.instructions`**: if user writes *"use sonnet for cost"* or *"use haiku"*, honor that override. Otherwise Opus.
-- **Anthropic prompt caching** is mandatory for the constant profile section (narrative + cv_json + scoring.instructions + few_shot_examples). Cache control: `{"type": "ephemeral"}` on the profile content block. Across ~200 candidates this is the difference between $30 and $150 per run on Opus.
-- **temperature=0** for stability across runs. Categorical decisions should be sticky.
-- **Parse the response as JSON.** If parsing fails, log the raw response and assign `Mid` with `confidence: "low"` and rationale noting the parse failure — never fail the run on a single LLM hiccup. Track parse-failure count in run summary so we can detect prompt drift.
-- **Track token usage.** Anthropic API responses include a `usage` object: `{input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens}`. Accumulate across all N candidate scoring calls in this run. Include the totals in the success-response envelope returned to the orchestrator (see Step 6 — "Return new jobs to orchestrator"). The orchestrator aggregates across passes and prints a token+cost block in the run summary.
+- **Sub-agent model:** `score-batch.md` declares `model: sonnet`. Sonnet handles ~10-candidate batches well; Opus would be overkill at this batch size. If a user wants Opus per-batch (for borderline-call sharpness on complex JDs), they can edit `score-batch.md` frontmatter.
+- **Override per-profile:** if `profile.scoring.instructions` mentions cost preferences ("use sonnet for cost", "haiku is fine"), the score-batch dispatch honors that — though Sonnet is already the default.
+- **Parse failures inside score-batch:** the sub-agent handles its own parse errors (assigns `Mid` + `confidence: low` + a rationale noting the failure). It never returns malformed JSON to compile-write.
+- **Quality bar (passed through to score-batch):** rationale and key_factors must be defensible to a reader who has only the JD + profile. If a rationale could apply to any role with the same title, it's too generic — sub-agents are instructed to re-think or downgrade confidence in that case.
+- **Bucket assignment is match-density-driven, evidence-grounded, not holistic-vibe.** Sub-agents enumerate factors first with quote-evidence, then weigh. Sparse JDs default to Mid. Critical concerns downgrade aggressively.
 
-**Quality bar:** the `rationale` and `key_factors` should make the verdict defensible to a reader who has only the JD + profile in front of them. If you (the agent) wrote a rationale that could equally apply to any role with the same title, the rationale is too generic — re-prompt or downgrade confidence.
-
-**Bucket assignment is match-density-driven, evidence-grounded, not holistic-vibe.** The LLM enumerates factors first with quote-evidence, then weighs. Sparse JDs default to Mid. Critical concerns downgrade aggressively from pure match counting.
+**Token usage tracking:** each `score-batch` sub-agent returns approx token counts in its output file. compile-write aggregates these across batches and includes the total in the response envelope (see Step 6 — "Return new jobs to orchestrator"). The orchestrator rolls everything up into a token+cost block for the run summary.
 
 ## Step 4 — Write new qualifying jobs to tracker
 
