@@ -20,6 +20,23 @@ Existing tracker rows have their LLM-derived fields (`Match`, `Why Fits`, `Key F
 - For deleting bad rows — jobs-rescore updates; doesn't delete. Use Notion's row-delete UI or extend with `archive` mode if you need it.
 - For rescoring closed rows — by default skips rows where `Status: Closed` (they're no longer actionable; rescoring wastes tokens). Override with `--include-closed` if you really want to rescore historical entries.
 
+## Tool discipline — IMPORTANT
+
+You are a Claude Code agent. **The "scoring" in this skill happens in your own reasoning context** — i.e. you (the agent) read each candidate, reason about it against the profile + CV, and produce the verdict + rationale + key factors directly. You are the LLM doing the scoring.
+
+**Do NOT:**
+- `import anthropic` or use the Python Anthropic SDK
+- Call `api.anthropic.com` directly via urllib / curl / requests
+- Ask for an `ANTHROPIC_API_KEY` — none is needed; agents run on Claude as substrate
+- Spawn a Python subprocess to do scoring
+
+**Do:**
+- Use `Bash` only for: reading/writing JSON files in `/tmp/`, calling `./scripts/notion-api.py` (query + update), invoking `ats_adapters.py` helpers if needed for JD re-fetch
+- Use `Agent` to dispatch `scrape-extract` if Step 3 needs to re-fetch JD bodies for scrape-tracked rows
+- Use `Read` / `Write` for file IO
+
+If you find yourself thinking "let me write Python code that imports `anthropic`" — STOP. The scoring is YOU thinking about each candidate; it's not a shell-out.
+
 ## Step 0 — Determine deployment mode + load context
 
 Read `state/.setup_complete[deployment_mode]` and `[auth_method]`.
@@ -121,7 +138,9 @@ For each row in `/tmp/re-score-targets.json`:
 
 1. Build a synthetic candidate payload: `{title, company, location, department, url, description: <fetched JD or stub>, ats, region, regional_remote_score (recompute or carry forward)}`.
 
-2. Call the v3 scoring prompt (same as compile-write Step 3.v3). Parse response: `{verdict, rationale, key_factors, confidence}`.
+2. **Score the candidate in your own reasoning context.** Read the candidate fields + the profile (cv_json, context, scoring.instructions). Apply the same scoring logic as `compile-write` Step 3 (see `.claude/agents/compile-write.md` for the canonical prompt structure and quality bar — the rules about evidence-grounded match/concern/gap citations apply identically here). Produce: `{verdict: "High"|"Mid"|"Low", rationale: "<1-3 sentences>", key_factors: ["match: ...", "concern: ...", "gap: ..."], confidence: "high"|"medium"|"low"}`.
+
+   **This is in-context reasoning, NOT a shell-out to an SDK.** You read the inputs, you produce the verdict object as your output. Then proceed to Step 4.3 with that object in hand. (See "Tool discipline" above if this is unclear.)
 
 3. **Apply hard exclusions** (same as compile-write Step 2). If a row that was originally Mid is now hard-excluded by an updated profile, mark its Status as "Not interested" automatically and add a Why Fits note: *"Re-score: now hard-excluded by profile [reason]. Manual review."* — don't silently drop it; the user should see what changed.
 
