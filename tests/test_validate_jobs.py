@@ -99,11 +99,13 @@ class SupportedAtsForValidateTests(unittest.TestCase):
     def test_supported_ats_for_validate(self):
         # Pins the validate-able ATS set so a regression that drops one is caught.
         # v3.1.0: ashby, greenhouse, comeet, lever, teamtailor, homerun.
-        # feature/more-ats: + smartrecruiters, workable, recruitee.
+        # feature/more-ats Easy:   + smartrecruiters, workable, recruitee.
+        # feature/more-ats Medium: + personio, bamboohr.
         supported = self.mod.supported_ats_for_validate()
         self.assertEqual(supported, {
             "ashby", "greenhouse", "comeet", "lever", "teamtailor", "homerun",
             "smartrecruiters", "workable", "recruitee",
+            "personio", "bamboohr",
         })
 
     def test_lever(self):
@@ -153,9 +155,23 @@ class SupportedAtsForValidateTests(unittest.TestCase):
             ("recruitee", "acme"),
         )
 
-    def test_personio_unsupported_returns_none(self):
-        # Personio not yet added (Medium tier follow-up); falls through to name-index.
-        self.assertIsNone(self.mod.ats_from_url("https://acme.jobs.personio.de/job/123"))
+    def test_personio_recognized(self):
+        # Personio added in feature/more-ats Medium tier.
+        self.assertEqual(
+            self.mod.ats_from_url("https://acme.jobs.personio.de/job/123"),
+            ("personio", "acme"),
+        )
+        # Other TLDs: .com / .es / .it accepted equivalently.
+        self.assertEqual(
+            self.mod.ats_from_url("https://acme.jobs.personio.com/job/123"),
+            ("personio", "acme"),
+        )
+
+    def test_bamboohr_recognized(self):
+        self.assertEqual(
+            self.mod.ats_from_url("https://kosmos.bamboohr.com/careers/41"),
+            ("bamboohr", "kosmos"),
+        )
 
     def test_empty_url_returns_none(self):
         self.assertIsNone(self.mod.ats_from_url(""))
