@@ -96,12 +96,15 @@ class SupportedAtsForValidateTests(unittest.TestCase):
     def setUpClass(cls):
         cls.mod = load_script("validate-jobs.py", "validate_jobs")
 
-    def test_v310_supports_six_ats_for_validate(self):
-        # v3.1.0 expanded validate-able ATS set from {ashby, greenhouse, comeet}
-        # to include lever, teamtailor, homerun. This test pins that count so a
-        # regression that drops one is caught.
+    def test_supported_ats_for_validate(self):
+        # Pins the validate-able ATS set so a regression that drops one is caught.
+        # v3.1.0: ashby, greenhouse, comeet, lever, teamtailor, homerun.
+        # feature/more-ats: + smartrecruiters, workable, recruitee.
         supported = self.mod.supported_ats_for_validate()
-        self.assertEqual(supported, {"ashby", "greenhouse", "comeet", "lever", "teamtailor", "homerun"})
+        self.assertEqual(supported, {
+            "ashby", "greenhouse", "comeet", "lever", "teamtailor", "homerun",
+            "smartrecruiters", "workable", "recruitee",
+        })
 
     def test_lever(self):
         # Lever is recognized as an ATS but not currently supported by the validator;
@@ -127,9 +130,32 @@ class SupportedAtsForValidateTests(unittest.TestCase):
     def test_unrecognized_host_returns_none(self):
         self.assertIsNone(self.mod.ats_from_url("https://example.com/careers/abc"))
 
-    def test_workable_unsupported_returns_none(self):
-        # Workable / Personio / etc. — not yet recognized; falls through to name-index.
-        self.assertIsNone(self.mod.ats_from_url("https://apply.workable.com/foo/j/abc"))
+    def test_workable_recognized(self):
+        # Workable was added in feature/more-ats — recognised + slug captured.
+        self.assertEqual(
+            self.mod.ats_from_url("https://apply.workable.com/foo/j/abc"),
+            ("workable", "foo"),
+        )
+
+    def test_smartrecruiters_recognized(self):
+        self.assertEqual(
+            self.mod.ats_from_url("https://careers.smartrecruiters.com/Visa/744000124008239"),
+            ("smartrecruiters", "Visa"),
+        )
+        self.assertEqual(
+            self.mod.ats_from_url("https://jobs.smartrecruiters.com/Visa/744000124008239"),
+            ("smartrecruiters", "Visa"),
+        )
+
+    def test_recruitee_recognized(self):
+        self.assertEqual(
+            self.mod.ats_from_url("https://acme.recruitee.com/o/some-job-slug"),
+            ("recruitee", "acme"),
+        )
+
+    def test_personio_unsupported_returns_none(self):
+        # Personio not yet added (Medium tier follow-up); falls through to name-index.
+        self.assertIsNone(self.mod.ats_from_url("https://acme.jobs.personio.de/job/123"))
 
     def test_empty_url_returns_none(self):
         self.assertIsNone(self.mod.ats_from_url(""))

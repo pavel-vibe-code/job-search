@@ -7,8 +7,14 @@ stored state, and outputs new/removed jobs as JSON to stdout.
 
 Supported `ats` types in companies.json:
   - ashby           : api.ashbyhq.com posting API (JSON)
-  - greenhouse      : boards-api.greenhouse.io (JSON)
+  - greenhouse      : boards-api.greenhouse.io (classic + EU residency, JSON)
+  - lever           : api.lever.co/v0 postings (JSON)
   - comeet          : Comeet careers HTML scrape (no public API token)
+  - teamtailor      : <slug>.teamtailor.com/api/v1 (JSON:API)
+  - homerun         : api.homerun.co/v1 (JSON)
+  - smartrecruiters : api.smartrecruiters.com/v1 postings (JSON, paginated)
+  - workable        : apply.workable.com/api/v3 jobs (JSON)
+  - recruitee       : <slug>.recruitee.com/api/offers (JSON)
   - html_static     : Generic static-HTML scrape with configurable link regex
   - static_roles    : Inline role list from companies.json (no HTTP). Surfaced as
                       a low-confidence notification, only when the inline role list
@@ -445,6 +451,86 @@ def fetch_homerun(company: dict) -> Tuple[list, Optional[str]]:
         return [], f"parse_error:{e}"
 
 
+# ── SmartRecruiters (feature/more-ats Easy tier) ────────────────────────────
+SMARTRECRUITERS_API = "https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=100&offset={offset}"
+
+
+def fetch_smartrecruiters(company: dict) -> Tuple[list, Optional[str]]:
+    """SmartRecruiters: paginate via offset until totalFound is exhausted.
+
+    Cap at 20 pages (2000 jobs) — large customers like Bosch can have
+    thousands; the cap keeps a single run bounded while capturing the
+    practical hiring set for any one slice.
+    """
+    out: list = []
+    offset = 0
+    last_err: Optional[str] = None
+    for _page in range(20):
+        data, err = http_get(SMARTRECRUITERS_API.format(slug=company["slug"], offset=offset))
+        if err:
+            last_err = err
+            break
+        try:
+            body = json.loads(data.decode("utf-8"))
+        except Exception as e:
+            return out, f"parse_error:{e}"
+        content = body.get("content", [])
+        if not isinstance(content, list):
+            return out, "unexpected_shape"
+        out.extend(content)
+        total = body.get("totalFound", 0)
+        offset += len(content)
+        if not content or offset >= total:
+            break
+    if last_err and not out:
+        return [], last_err
+    return out, None
+
+
+# ── Workable (feature/more-ats Easy tier) ─────────────────────────────────
+# Public widget endpoint — the v3 accounts API in older docs returns 404 on
+# apply.workable.com; the v1 widget at /api/v1/widget/accounts/{slug} is what
+# real boards serve. Response: {"name", "description", "jobs": [...]}.
+WORKABLE_API = "https://apply.workable.com/api/v1/widget/accounts/{slug}"
+
+
+def fetch_workable(company: dict) -> Tuple[list, Optional[str]]:
+    """Workable widget API. Returns the `jobs` array."""
+    data, err = http_get(WORKABLE_API.format(slug=company["slug"]))
+    if err:
+        return [], err
+    try:
+        body = json.loads(data.decode("utf-8"))
+    except Exception as e:
+        return [], f"parse_error:{e}"
+    items = body.get("jobs") if isinstance(body, dict) else body
+    if not isinstance(items, list):
+        return [], "unexpected_shape"
+    return items, None
+
+
+# ── Recruitee (feature/more-ats Easy tier) ─────────────────────────────────
+RECRUITEE_API = "https://{slug}.recruitee.com/api/offers/"
+
+
+def fetch_recruitee(company: dict) -> Tuple[list, Optional[str]]:
+    """Recruitee public offers API. Returns {offers: [...]}.
+
+    Each offer has stable numeric `id` plus string `slug` used in URLs.
+    """
+    data, err = http_get(RECRUITEE_API.format(slug=company["slug"]))
+    if err:
+        return [], err
+    try:
+        body = json.loads(data.decode("utf-8"))
+    except Exception as e:
+        return [], f"parse_error:{e}"
+    items = body.get("offers", []) if isinstance(body, dict) else body
+    if not isinstance(items, list):
+        return [], "unexpected_shape"
+    return items, None
+
+
 # ── Scrape — Claude Code agent fallback ──────────────────────────────────
 # fetch-and-diff doesn't fetch scrape companies inline. It emits
 # needs_scraping.json listing them; the search-roles agent dispatches
@@ -756,19 +842,137 @@ def normalise_homerun(job: dict, company: dict) -> dict:
     }
 
 
+def normalise_smartrecruiters(job: dict, company: dict) -> dict:
+    """SmartRecruiters posting structure:
+      {id, name, uuid, jobAdId, refNumber, ref, company, releasedDate,
+       location: {city, region, country, remote, hybrid, fullLocation},
+       department: {id, label}, function: {label}, typeOfEmployment: {label},
+       experienceLevel, customField, visibility, language, ...}
+    `jobAdUrl` is documented but observed as None in real responses; the
+    canonical user-facing URL is jobs.smartrecruiters.com/{slug}/{id}.
+    """
+    loc = job.get("location") or {}
+    if isinstance(loc, dict):
+        loc_name = loc.get("fullLocation") or " / ".join(filter(None, [
+            loc.get("city", ""), loc.get("country", "")
+        ]))
+        is_remote = bool(loc.get("remote"))
+        is_hybrid = bool(loc.get("hybrid"))
+    else:
+        loc_name = str(loc)
+        is_remote = "remote" in loc_name.lower()
+        is_hybrid = "hybrid" in loc_name.lower()
+    department = job.get("department") or {}
+    dept_label = department.get("label", "") if isinstance(department, dict) else str(department)
+    job_id = str(job.get("id", ""))
+    url = job.get("jobAdUrl") or (
+        f"https://jobs.smartrecruiters.com/{company['slug']}/{job_id}" if job_id else ""
+    )
+    return {
+        "id":             job_id,
+        "company":        company["name"],
+        "title":          job.get("name", ""),
+        "url":            url,
+        "location":       loc_name,
+        "is_remote":      is_remote and not is_hybrid,
+        "workplace_type": "Remote" if (is_remote and not is_hybrid) else ("Hybrid" if is_hybrid else ""),
+        "department":     dept_label,
+        "published_at":   job.get("releasedDate") or "",
+        "source":         company.get("source", "unknown"),
+        "ats":            "smartrecruiters",
+        # No description in the postings index — only the per-job detail call
+        # carries it. Skip here; downstream search-roles can backfill via JD
+        # fetch if a profile match warrants it.
+        "description":    "",
+    }
+
+
+def normalise_workable(job: dict, company: dict) -> dict:
+    """Workable v3 jobs entry:
+      {id, title, full_title, shortcode, code, state, department, url, application_url,
+       shortlink, location: {country, country_code, region, city, zip_code, telecommuting,
+       workplace}, created_at, employment_type, language, ...}
+    """
+    loc = job.get("location") or {}
+    if isinstance(loc, dict):
+        loc_name = " / ".join(filter(None, [
+            loc.get("city", ""), loc.get("region", ""), loc.get("country", "")
+        ]))
+        # Workable's `telecommuting=true` is the canonical remote flag;
+        # `workplace` may be "remote" / "hybrid" / "on_site" on newer accounts.
+        workplace = (loc.get("workplace") or "").lower()
+        is_remote = bool(loc.get("telecommuting")) or workplace == "remote"
+    else:
+        loc_name = str(loc)
+        workplace = ""
+        is_remote = "remote" in loc_name.lower()
+    return {
+        "id":             str(job.get("shortcode") or job.get("id") or ""),
+        "company":        company["name"],
+        "title":          job.get("title") or job.get("full_title", ""),
+        "url":            job.get("url") or job.get("shortlink") or job.get("application_url") or "",
+        "location":       loc_name,
+        "is_remote":      is_remote,
+        "workplace_type": "Remote" if is_remote else ("Hybrid" if workplace == "hybrid" else ""),
+        "department":     job.get("department") or "",
+        "published_at":   job.get("created_at") or "",
+        "source":         company.get("source", "unknown"),
+        "ats":            "workable",
+        # Workable's index returns no description — `description` requires a
+        # per-job detail call. Same trade-off as SmartRecruiters: keep empty,
+        # let downstream backfill on demand.
+        "description":    "",
+    }
+
+
+def normalise_recruitee(job: dict, company: dict) -> dict:
+    """Recruitee offer structure:
+      {id, slug, position, title, description, requirements, location, country_code,
+       city, remote, department, careers_apply_url, careers_url, employment_type_code,
+       created_at, ...}
+    """
+    location = " / ".join(filter(None, [
+        job.get("city", "") or "",
+        job.get("country_code", "") or "",
+    ]))
+    if not location:
+        location = job.get("location") or ""
+    is_remote = bool(job.get("remote")) or "remote" in str(location).lower()
+    description = job.get("description") or ""
+    if job.get("requirements"):
+        description = (description + "\n\n" + job["requirements"])[:DESCRIPTION_LIMIT * 2]
+    return {
+        "id":             str(job.get("id", "")),
+        "company":        company["name"],
+        "title":          job.get("title") or job.get("position", ""),
+        "url":            job.get("careers_apply_url") or job.get("careers_url") or "",
+        "location":       location,
+        "is_remote":      is_remote,
+        "workplace_type": "Remote" if is_remote else "",
+        "department":     job.get("department") or "",
+        "published_at":   job.get("created_at") or "",
+        "source":         company.get("source", "unknown"),
+        "ats":            "recruitee",
+        "description":    description[:DESCRIPTION_LIMIT],
+    }
+
+
 FETCHER_DISPATCH = {
-    "ashby":        (fetch_ashby,        normalise_ashby),
-    "greenhouse":   (fetch_greenhouse,   normalise_greenhouse),
-    "comeet":       (fetch_comeet,       normalise_comeet),
-    "lever":        (fetch_lever,        normalise_lever),         # v3.1.1
-    "teamtailor":   (fetch_teamtailor,   normalise_teamtailor),    # v3.1.1
-    "homerun":      (fetch_homerun,      normalise_homerun),       # v3.1.1
+    "ashby":           (fetch_ashby,           normalise_ashby),
+    "greenhouse":      (fetch_greenhouse,      normalise_greenhouse),
+    "comeet":          (fetch_comeet,          normalise_comeet),
+    "lever":           (fetch_lever,           normalise_lever),           # v3.1.1
+    "teamtailor":      (fetch_teamtailor,      normalise_teamtailor),      # v3.1.1
+    "homerun":         (fetch_homerun,         normalise_homerun),         # v3.1.1
+    "smartrecruiters": (fetch_smartrecruiters, normalise_smartrecruiters), # feature/more-ats
+    "workable":        (fetch_workable,        normalise_workable),        # feature/more-ats
+    "recruitee":       (fetch_recruitee,       normalise_recruitee),       # feature/more-ats
     # "scrape" intentionally absent (v4.0.0): scrape companies are handled
     # by the search-roles agent dispatching the scrape-extract Claude Code
     # agent, then diffing via scripts/diff-scrape.py. They land in the
     # `scrape_pending` output bucket below, not in `fetchable`.
-    "html_static":  (fetch_html_static,  normalise_html_static),
-    "static_roles": (fetch_static_roles, normalise_static_role),
+    "html_static":     (fetch_html_static,     normalise_html_static),
+    "static_roles":    (fetch_static_roles,    normalise_static_role),
 }
 
 

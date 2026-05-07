@@ -74,6 +74,17 @@ LEVER_API      = "https://api.lever.co/v0/postings/{slug}?mode=json"
 TEAMTAILOR_API = "https://{slug}.teamtailor.com/api/v1/jobs?page%5Bsize%5D=200"
 HOMERUN_API    = "https://api.homerun.co/v1/jobs/?company_subdomain={slug}"
 
+# feature/more-ats: SmartRecruiters / Workable / Recruitee (Easy tier)
+# Public read-only JSON APIs. SmartRecruiters paginates via offset/limit; the
+# others return everything in one page for typical company sizes.
+SMARTRECRUITERS_API = "https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=100&offset={offset}"
+# Workable: use the public widget endpoint (Workable's apparent public surface
+# for embed/listing). The /api/v3/accounts/{slug}/jobs path appears in older
+# docs but returns 404 on apply.workable.com; the v1 widget endpoint is what
+# active boards actually serve. Returns {"name", "description", "jobs": [...]}.
+WORKABLE_API        = "https://apply.workable.com/api/v1/widget/accounts/{slug}"
+RECRUITEE_API       = "https://{slug}.recruitee.com/api/offers/"
+
 
 # === Active-ID fetchers — one per supported ATS ===============================
 
@@ -183,6 +194,76 @@ def fetch_active_ids_homerun(slug: str, **_) -> Tuple[set, Optional[str]]:
         return set(), f"parse:{e}"
 
 
+def fetch_active_ids_smartrecruiters(slug: str, **_) -> Tuple[set, Optional[str]]:
+    """SmartRecruiters public postings API — paginated.
+
+    Returns {"content": [...], "totalFound": N, "limit": 100, "offset": ...}.
+    Companies range from a handful of jobs to multiple thousands (SAP, Bosch),
+    so we must paginate via offset until totalFound is exhausted. Hard cap at
+    20 pages (2000 jobs) to bound a runaway response.
+    """
+    ids: set = set()
+    offset = 0
+    for _page in range(20):
+        data, err = http_get(SMARTRECRUITERS_API.format(slug=slug, offset=offset))
+        if err:
+            return set(), err
+        try:
+            body = json.loads(data.decode("utf-8"))
+        except Exception as e:
+            return set(), f"parse:{e}"
+        content = body.get("content", [])
+        if not isinstance(content, list):
+            return set(), "unexpected_shape"
+        for j in content:
+            if j.get("id"):
+                ids.add(str(j["id"]))
+        total = body.get("totalFound", 0)
+        offset += len(content)
+        if not content or offset >= total:
+            break
+    return ids, None
+
+
+def fetch_active_ids_workable(slug: str, **_) -> Tuple[set, Optional[str]]:
+    """Workable public widget API at apply.workable.com/api/v1/widget/accounts/{slug}.
+
+    Response: {"name": "<company>", "description": "...", "jobs": [{...}, ...]}.
+    Each job is keyed by `shortcode` (e.g. "ABC123") which appears in the
+    user-facing URL — that's what we use as the stable ID.
+    """
+    data, err = http_get(WORKABLE_API.format(slug=slug))
+    if err:
+        return set(), err
+    try:
+        body = json.loads(data.decode("utf-8"))
+    except Exception as e:
+        return set(), f"parse:{e}"
+    items = body.get("jobs") if isinstance(body, dict) else body
+    if not isinstance(items, list):
+        return set(), "unexpected_shape"
+    return {str(j.get("shortcode") or j.get("id")) for j in items if (j.get("shortcode") or j.get("id"))}, None
+
+
+def fetch_active_ids_recruitee(slug: str, **_) -> Tuple[set, Optional[str]]:
+    """Recruitee public offers API at {slug}.recruitee.com/api/offers/.
+
+    Response: {"offers": [{id, slug, title, ...}, ...]}. Recruitee uses
+    numeric `id` plus a string `slug`; we key on `id` since it's stable.
+    """
+    data, err = http_get(RECRUITEE_API.format(slug=slug))
+    if err:
+        return set(), err
+    try:
+        body = json.loads(data.decode("utf-8"))
+    except Exception as e:
+        return set(), f"parse:{e}"
+    items = body.get("offers", []) if isinstance(body, dict) else body
+    if not isinstance(items, list):
+        return set(), "unexpected_shape"
+    return {str(j.get("id")) for j in items if j.get("id")}, None
+
+
 # === Adapter registry =========================================================
 
 # Each entry: ats_name -> {url_pattern, active_ids_fetcher, active_validate_supported}
@@ -219,6 +300,26 @@ ATS_ADAPTERS: dict = {
         # <slug>.homerun.co/<path> — user-facing pages on subdomain
         "url_pattern": re.compile(r'^https?://([a-z0-9-]+)\.homerun\.co/'),
         "active_ids_fetcher": fetch_active_ids_homerun,
+        "active_validate_supported": True,
+    },
+    "smartrecruiters": {
+        # Two listing surfaces:
+        #   careers.smartrecruiters.com/<company>/<job-id>-<slug>
+        #   jobs.smartrecruiters.com/<company>/<job-id>
+        "url_pattern": re.compile(r'^https?://(?:careers|jobs)\.smartrecruiters\.com/([^/]+)'),
+        "active_ids_fetcher": fetch_active_ids_smartrecruiters,
+        "active_validate_supported": True,
+    },
+    "workable": {
+        # apply.workable.com/<slug>/[j/<shortcode>/...]
+        "url_pattern": re.compile(r'^https?://apply\.workable\.com/([^/]+)'),
+        "active_ids_fetcher": fetch_active_ids_workable,
+        "active_validate_supported": True,
+    },
+    "recruitee": {
+        # <slug>.recruitee.com/o/<offer-slug>
+        "url_pattern": re.compile(r'^https?://([a-z0-9-]+)\.recruitee\.com/'),
+        "active_ids_fetcher": fetch_active_ids_recruitee,
         "active_validate_supported": True,
     },
     "scrape": {
