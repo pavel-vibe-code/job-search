@@ -27,6 +27,7 @@ import json
 import re
 import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ET
 from typing import Callable, Optional, Tuple
 
 
@@ -84,6 +85,16 @@ SMARTRECRUITERS_API = "https://api.smartrecruiters.com/v1/companies/{slug}/posti
 # active boards actually serve. Returns {"name", "description", "jobs": [...]}.
 WORKABLE_API        = "https://apply.workable.com/api/v1/widget/accounts/{slug}"
 RECRUITEE_API       = "https://{slug}.recruitee.com/api/offers/"
+
+# Medium tier: Personio (XML feed) and BambooHR (JSON).
+# Personio's job board lives under {slug}.jobs.personio.de — the .de TLD is
+# canonical; .com / .es / .it variants exist but the .de XML feed is what
+# every Personio tenant exposes regardless of UI language. Root element is
+# <workzag-jobs> with child <position> entries.
+PERSONIO_API  = "https://{slug}.jobs.personio.de/xml"
+# BambooHR's /careers/list returns {"result": [...], "meta": {"totalCount": N}}.
+# Each result is a minimal job summary; full body needs a separate /jobs/{id}.json call.
+BAMBOOHR_API  = "https://{slug}.bamboohr.com/careers/list"
 
 
 # === Active-ID fetchers — one per supported ATS ===============================
@@ -264,6 +275,53 @@ def fetch_active_ids_recruitee(slug: str, **_) -> Tuple[set, Optional[str]]:
     return {str(j.get("id")) for j in items if j.get("id")}, None
 
 
+def fetch_active_ids_personio(slug: str, **_) -> Tuple[set, Optional[str]]:
+    """Personio public XML feed at {slug}.jobs.personio.de/xml.
+
+    Root <workzag-jobs> contains <position> children. Each position has an
+    <id> child carrying the numeric ID we use as the stable key.
+
+    Note on TLD: Personio publishes .de / .com / .es / .it variants of the
+    job board, but the XML feed is mirrored across all of them; .de is the
+    historical canonical and works for every tenant regardless of UI locale.
+    """
+    data, err = http_get(PERSONIO_API.format(slug=slug), accept="application/xml")
+    if err:
+        return set(), err
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError as e:
+        return set(), f"parse:{e}"
+    ids = set()
+    # Positions can sit either directly under root (<workzag-jobs>) or wrapped
+    # in <positions>; iterate both shapes defensively.
+    for pos in root.iter("position"):
+        pid = pos.findtext("id")
+        if pid:
+            ids.add(str(pid).strip())
+    return ids, None
+
+
+def fetch_active_ids_bamboohr(slug: str, **_) -> Tuple[set, Optional[str]]:
+    """BambooHR public careers list at {slug}.bamboohr.com/careers/list.
+
+    Response: {"meta": {"totalCount": N}, "result": [{id, jobOpeningName,
+    departmentLabel, locationCity, locationState, locationCountry,
+    employmentStatusLabel, atsUrl, ...}, ...]}.
+    """
+    data, err = http_get(BAMBOOHR_API.format(slug=slug))
+    if err:
+        return set(), err
+    try:
+        body = json.loads(data.decode("utf-8"))
+    except Exception as e:
+        return set(), f"parse:{e}"
+    items = body.get("result", []) if isinstance(body, dict) else body
+    if not isinstance(items, list):
+        return set(), "unexpected_shape"
+    return {str(j.get("id")) for j in items if j.get("id")}, None
+
+
 # === Adapter registry =========================================================
 
 # Each entry: ats_name -> {url_pattern, active_ids_fetcher, active_validate_supported}
@@ -320,6 +378,19 @@ ATS_ADAPTERS: dict = {
         # <slug>.recruitee.com/o/<offer-slug>
         "url_pattern": re.compile(r'^https?://([a-z0-9-]+)\.recruitee\.com/'),
         "active_ids_fetcher": fetch_active_ids_recruitee,
+        "active_validate_supported": True,
+    },
+    "personio": {
+        # <slug>.jobs.personio.de/job/<id> — slug captured before .jobs.
+        # TLDs: .de canonical; .com / .es / .it accepted equivalently.
+        "url_pattern": re.compile(r'^https?://([a-z0-9-]+)\.jobs\.personio\.(?:de|com|es|it)/'),
+        "active_ids_fetcher": fetch_active_ids_personio,
+        "active_validate_supported": True,
+    },
+    "bamboohr": {
+        # <slug>.bamboohr.com/jobs/view.php?id=<id> or /careers/<id>
+        "url_pattern": re.compile(r'^https?://([a-z0-9-]+)\.bamboohr\.com/'),
+        "active_ids_fetcher": fetch_active_ids_bamboohr,
         "active_validate_supported": True,
     },
     "scrape": {

@@ -13,8 +13,10 @@ Supported `ats` types in companies.json:
   - teamtailor      : <slug>.teamtailor.com/api/v1 (JSON:API)
   - homerun         : api.homerun.co/v1 (JSON)
   - smartrecruiters : api.smartrecruiters.com/v1 postings (JSON, paginated)
-  - workable        : apply.workable.com/api/v3 jobs (JSON)
+  - workable        : apply.workable.com/api/v1/widget (JSON)
   - recruitee       : <slug>.recruitee.com/api/offers (JSON)
+  - personio        : <slug>.jobs.personio.de/xml (XML)
+  - bamboohr        : <slug>.bamboohr.com/careers/list (JSON)
   - html_static     : Generic static-HTML scrape with configurable link regex
   - static_roles    : Inline role list from companies.json (no HTTP). Surfaced as
                       a low-confidence notification, only when the inline role list
@@ -42,6 +44,7 @@ import re
 import sys
 import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from typing import Optional, Tuple
@@ -531,6 +534,71 @@ def fetch_recruitee(company: dict) -> Tuple[list, Optional[str]]:
     return items, None
 
 
+# ── Personio (feature/more-ats Medium tier) ─────────────────────────────
+# XML feed at <slug>.jobs.personio.de/xml. Root <workzag-jobs> contains
+# <position> children with <id>, <name>, <office>, <department>,
+# <recruitingCategory>, <employmentType>, <jobDescriptions>, etc.
+PERSONIO_API = "https://{slug}.jobs.personio.de/xml"
+
+
+def fetch_personio(company: dict) -> Tuple[list, Optional[str]]:
+    data, err = http_get(PERSONIO_API.format(slug=company["slug"]), accept="application/xml")
+    if err:
+        return [], err
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError as e:
+        return [], f"parse_error:{e}"
+    # Materialize each <position> as a dict so the normaliser doesn't have to
+    # re-walk the tree. Concatenate jobDescription fragments into a single
+    # description string so the existing description-truncation logic applies.
+    out = []
+    for pos in root.iter("position"):
+        descs = []
+        for jd in pos.findall(".//jobDescription"):
+            n = (jd.findtext("name") or "").strip()
+            v = (jd.findtext("value") or "").strip()
+            if n or v:
+                descs.append(f"{n}\n{v}" if n else v)
+        addl_offices = [o.text for o in pos.findall(".//additionalOffices/office") if o.text]
+        out.append({
+            "id":                 (pos.findtext("id") or "").strip(),
+            "name":               (pos.findtext("name") or "").strip(),
+            "subcompany":         (pos.findtext("subcompany") or "").strip(),
+            "office":             (pos.findtext("office") or "").strip(),
+            "additional_offices": addl_offices,
+            "department":         (pos.findtext("department") or "").strip(),
+            "recruiting_category": (pos.findtext("recruitingCategory") or "").strip(),
+            "employment_type":    (pos.findtext("employmentType") or "").strip(),
+            "schedule":           (pos.findtext("schedule") or "").strip(),
+            "seniority":          (pos.findtext("seniority") or "").strip(),
+            "years_of_experience": (pos.findtext("yearsOfExperience") or "").strip(),
+            "office_remote":      (pos.findtext("officeRemote") or "").strip(),
+            "created_at":         (pos.findtext("createdAt") or "").strip(),
+            "description":        "\n\n".join(descs),
+        })
+    return out, None
+
+
+# ── BambooHR (feature/more-ats Medium tier) ─────────────────────────────
+# {slug}.bamboohr.com/careers/list returns {result: [...], meta: {totalCount}}.
+BAMBOOHR_API = "https://{slug}.bamboohr.com/careers/list"
+
+
+def fetch_bamboohr(company: dict) -> Tuple[list, Optional[str]]:
+    data, err = http_get(BAMBOOHR_API.format(slug=company["slug"]))
+    if err:
+        return [], err
+    try:
+        body = json.loads(data.decode("utf-8"))
+    except Exception as e:
+        return [], f"parse_error:{e}"
+    items = body.get("result", []) if isinstance(body, dict) else body
+    if not isinstance(items, list):
+        return [], "unexpected_shape"
+    return items, None
+
+
 # ── Scrape — Claude Code agent fallback ──────────────────────────────────
 # fetch-and-diff doesn't fetch scrape companies inline. It emits
 # needs_scraping.json listing them; the search-roles agent dispatches
@@ -957,6 +1025,88 @@ def normalise_recruitee(job: dict, company: dict) -> dict:
     }
 
 
+def normalise_personio(job: dict, company: dict) -> dict:
+    """Personio position (already materialised by fetch_personio).
+
+    Personio doesn't publish per-position user-facing URLs in the XML feed,
+    so we construct the canonical board URL: {slug}.jobs.personio.de/job/{id}.
+    `officeRemote` carries values like "fully", "partially", "no". `office`
+    is the primary location; additional_offices captures multi-location postings.
+    """
+    location_parts = [job.get("office", "")]
+    location_parts.extend(job.get("additional_offices") or [])
+    location = " / ".join([p for p in location_parts if p])
+    office_remote = (job.get("office_remote") or "").lower()
+    is_remote = office_remote == "fully"
+    is_hybrid = office_remote == "partially"
+    department = job.get("department", "") or job.get("recruiting_category", "")
+    return {
+        "id":             str(job.get("id", "")),
+        "company":        company["name"],
+        "title":          job.get("name", ""),
+        "url":            f"https://{company['slug']}.jobs.personio.de/job/{job.get('id', '')}",
+        "location":       location,
+        "is_remote":      is_remote,
+        "workplace_type": "Remote" if is_remote else ("Hybrid" if is_hybrid else ""),
+        "department":     department,
+        "published_at":   job.get("created_at") or "",
+        "source":         company.get("source", "unknown"),
+        "ats":            "personio",
+        # Personio's jobDescriptions tend to be HTML — keep raw, downstream
+        # description-trim handles length. Pass it through DESCRIPTION_LIMIT
+        # for parity with the other normalisers.
+        "description":    (job.get("description") or "")[:DESCRIPTION_LIMIT],
+    }
+
+
+def normalise_bamboohr(job: dict, company: dict) -> dict:
+    """BambooHR job summary fields (verified shape):
+      {id, jobOpeningName, departmentId, departmentLabel, employmentStatusLabel,
+       location: {city, state}, atsLocation: {country, state, province, city},
+       isRemote, locationType}
+    The /careers/list endpoint omits description, atsUrl, and datePosted; we
+    construct the user-facing URL as {slug}.bamboohr.com/careers/{id} which
+    is the canonical pattern across BambooHR career pages.
+
+    `locationType`: BambooHR's API uses an opaque numeric code; "2" appears
+    to be on-site; values for remote/hybrid not yet documented. Trust
+    `isRemote` boolean when present; otherwise infer from location string.
+    """
+    loc = job.get("location") or {}
+    ats_loc = job.get("atsLocation") or {}
+    if isinstance(loc, dict):
+        primary_loc = " / ".join(filter(None, [loc.get("city") or "", loc.get("state") or ""]))
+    else:
+        primary_loc = str(loc)
+    if isinstance(ats_loc, dict):
+        ats_loc_str = " / ".join(filter(None, [
+            ats_loc.get("city") or "",
+            ats_loc.get("state") or ats_loc.get("province") or "",
+            ats_loc.get("country") or "",
+        ]))
+    else:
+        ats_loc_str = ""
+    location = primary_loc or ats_loc_str
+    location_lower = location.lower()
+    is_remote = bool(job.get("isRemote")) or "remote" in location_lower
+    is_hybrid = "hybrid" in location_lower
+    return {
+        "id":             str(job.get("id", "")),
+        "company":        company["name"],
+        "title":          job.get("jobOpeningName", ""),
+        "url":            f"https://{company['slug']}.bamboohr.com/careers/{job.get('id', '')}",
+        "location":       location,
+        "is_remote":      is_remote and not is_hybrid,
+        "workplace_type": "Remote" if (is_remote and not is_hybrid) else ("Hybrid" if is_hybrid else ""),
+        "department":     job.get("departmentLabel") or "",
+        "published_at":   "",
+        "source":         company.get("source", "unknown"),
+        "ats":            "bamboohr",
+        # No description in /careers/list — only the per-job detail call has it.
+        "description":    "",
+    }
+
+
 FETCHER_DISPATCH = {
     "ashby":           (fetch_ashby,           normalise_ashby),
     "greenhouse":      (fetch_greenhouse,      normalise_greenhouse),
@@ -964,9 +1114,11 @@ FETCHER_DISPATCH = {
     "lever":           (fetch_lever,           normalise_lever),           # v3.1.1
     "teamtailor":      (fetch_teamtailor,      normalise_teamtailor),      # v3.1.1
     "homerun":         (fetch_homerun,         normalise_homerun),         # v3.1.1
-    "smartrecruiters": (fetch_smartrecruiters, normalise_smartrecruiters), # feature/more-ats
-    "workable":        (fetch_workable,        normalise_workable),        # feature/more-ats
-    "recruitee":       (fetch_recruitee,       normalise_recruitee),       # feature/more-ats
+    "smartrecruiters": (fetch_smartrecruiters, normalise_smartrecruiters), # feature/more-ats Easy
+    "workable":        (fetch_workable,        normalise_workable),        # feature/more-ats Easy
+    "recruitee":       (fetch_recruitee,       normalise_recruitee),       # feature/more-ats Easy
+    "personio":        (fetch_personio,        normalise_personio),        # feature/more-ats Medium
+    "bamboohr":        (fetch_bamboohr,        normalise_bamboohr),        # feature/more-ats Medium
     # "scrape" intentionally absent (v4.0.0): scrape companies are handled
     # by the search-roles agent dispatching the scrape-extract Claude Code
     # agent, then diffing via scripts/diff-scrape.py. They land in the
