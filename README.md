@@ -15,7 +15,7 @@ Each pipeline run (manual or scheduled):
 
 A typical setup: wire it up via Cloud Routine to fire weekly. You wake up Monday with 0–10 new candidates pre-vetted. No more manually trawling 50+ careers pages. (Daily / monthly / event-triggered cadences also work — the plugin doesn't care, it runs when invoked.)
 
-**What v1.0 ships with** (after iteration through internal v2.x → v4.x): CV-grounded LLM-judged categorical scoring (High / Mid / Low buckets, not numeric rubric); 6 deterministic ATS adapters (Ashby, Greenhouse incl. EU subdomain, Lever, Comeet, Teamtailor, Homerun) plus a Claude Code agent–based scrape fallback for any HTML careers page (no API key required); Notion-feedback learning loop that improves scoring week-over-week from your tracker labels; `jobs-extend-companies` skill for dialogue-based add/remove/update of custom-tracked companies on top of the AI 50 baseline (no JSON editing); `jobs-scrape-page` skill for ad-hoc extraction-quality testing; per-run token + cost tracking against your Claude.ai subscription quota. See [CHANGELOG.md](CHANGELOG.md) for the full development trail.
+**What v1.0 ships with** (after iteration through internal v2.x → v4.x): CV-grounded LLM-judged categorical scoring (High / Mid / Low buckets, not numeric rubric); 11 deterministic ATS adapters (Ashby, Greenhouse incl. EU subdomain, Lever, Comeet, Teamtailor, Homerun, SmartRecruiters, Workable, Recruitee, Personio, BambooHR) plus a Claude Code agent–based scrape fallback for any HTML careers page (no API key required); Notion-feedback learning loop that improves scoring week-over-week from your tracker labels; `jobs-extend-companies` skill for dialogue-based add/remove/update of custom-tracked companies on top of the AI 50 baseline (no JSON editing); `jobs-scrape-page` skill for ad-hoc extraction-quality testing; per-run token + cost tracking against your Claude.ai subscription quota. See [CHANGELOG.md](CHANGELOG.md) for the full development trail.
 
 ---
 
@@ -43,7 +43,7 @@ The pipeline has six passes per run:
 
 | Pass | Component | What it does |
 |---|---|---|
-| 1 | `search-roles` agent | Fetches each company's ATS API directly (Ashby / Greenhouse incl. EU / Lever / Comeet / Teamtailor / Homerun); for any company tagged `ats: scrape`, dispatches the `scrape-extract` Claude Code agent (Haiku) to extract jobs from the HTML careers page. Diffs all results against the State DB so only NEW jobs surface. |
+| 1 | `search-roles` agent | Fetches each company's ATS API directly (Ashby / Greenhouse incl. EU / Lever / Comeet / Teamtailor / Homerun / SmartRecruiters / Workable / Recruitee / Personio / BambooHR); for any company tagged `ats: scrape`, dispatches the `scrape-extract` Claude Code agent (Haiku) to extract jobs from the HTML careers page. Diffs all results against the State DB so only NEW jobs surface. |
 | 2 | `validate-urls` agent | Confirms each candidate listing is still live (drops postings closed since last week) |
 | 3 | `compile-write` agent | Applies typed hard exclusions (language, location, custom rules), scores survivors with LLM-judged High/Mid/Low against your CV + criteria, writes qualifying rows to your Tracker DB |
 | 4 | (orchestrator) | Persists the run's job-ID state to the State DB so next week's diff works |
@@ -97,7 +97,7 @@ This plugin owns the scattered-source problem: fetches everything, runs your fil
 - **Two auth paths:** Notion MCP (OAuth, plug-and-play, fine for laptop runs) or API token (deterministic, recommended for Cloud Routines where >95% per-run success matters).
 - **Markdown fallback for resilience.** If Notion writes fail mid-run (auth blip, API outage), the orchestrator emits the rows to `outputs/<date>-tracker-fallback.md` so results aren't lost; state is auto-corrected so next run retries.
 - **Notion-only data layer, no external DB.** State, profile, favorites all live in the Notion workspace this plugin sets up for you. No Postgres, no S3, no infra. Notion was chosen as the data layer because it gives non-coders a usable database UI without any server or schema-migration setup; users without prior Notion experience can sign up free at notion.so during setup.
-- **172 unit tests pin the filter and dispatch logic.** The tests cover eight common candidate personas (home-region only, open to relocation, multi-region remote, etc.) plus URL→ATS dispatch coverage, so future changes can't silently break filtering for one archetype or break a connector while looking fine for another.
+- **176 unit tests pin the filter and dispatch logic.** The tests cover eight common candidate personas (home-region only, open to relocation, multi-region remote, etc.) plus URL→ATS dispatch coverage, so future changes can't silently break filtering for one archetype or break a connector while looking fine for another.
 
 ---
 
