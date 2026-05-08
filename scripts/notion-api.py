@@ -56,7 +56,18 @@ from pathlib import Path
 from typing import Any, Optional
 
 NOTION_API_BASE  = "https://api.notion.com/v1"
-NOTION_VERSION   = "2022-06-28"
+# Notion-Version: bumped from 2022-06-28 to 2025-09-03 to support the data
+# sources abstraction. Notion silently migrated existing single-source DBs to
+# the new format; on 2022-06-28, querying a migrated DB returns an error
+# instead of results. The 2025-09-03 contract:
+#   - GET /databases/{id} now returns a data_sources: [{id, name}] array
+#   - POST /data_sources/{ds_id}/query is the canonical query endpoint
+#     (legacy POST /databases/{id}/query still works for some single-source
+#     DBs but breaks on multi-source — resolve first, then dispatch)
+#   - Page parents that target a database can use either {database_id} (auto-
+#     resolved to primary data source) or {data_source_id} explicitly. We
+#     keep {database_id} for create_pages — Notion's compat shim handles it.
+NOTION_VERSION   = "2025-09-03"
 RICH_TEXT_LIMIT  = 1900  # safety margin under Notion's 2000-char per-element limit
 HTTP_TIMEOUT     = 30
 DEFAULT_TOKEN_FILE = "~/.config/ai50-job-search/notion-token"
@@ -404,11 +415,15 @@ def _resolve_parent(parent_id: str, parent_type: str) -> dict:
     if parent_type == "page":
         return {"page_id": parent_id}
     if parent_type == "database":
+        # Notion-Version 2025-09-03 still accepts {database_id} parents on
+        # /pages and auto-resolves to the primary data source; we keep this
+        # path so existing orchestrators can pass a database ID directly.
         return {"database_id": parent_id}
     if parent_type == "data_source":
-        # Notion API doesn't expose data-source IDs directly (those are MCP-side
-        # constructs). For api_token mode, treat data_source_id as database_id.
-        return {"database_id": parent_id}
+        # 2025-09-03 made data_source_id a first-class parent type. MCP-side
+        # tooling already exposes data_source IDs; this lets api_token mode
+        # consume them too without round-tripping through the parent DB.
+        return {"data_source_id": parent_id}
     raise ValueError(f"unsupported parent_type: {parent_type}")
 
 
@@ -530,26 +545,96 @@ def cmd_fetch_page_body(args, token):
     print(json.dumps({"id": args.page_id, "body_text": text, "block_count": len(cb.get("results", []))}))
 
 
+def _resolve_data_source_ids(database_id: str, token: str) -> tuple[list, Optional[str]]:
+    """Resolve the data_source IDs for a database (Notion-Version 2025-09-03+).
+
+    Every database now exposes a `data_sources: [{id, name}]` array — even
+    single-source DBs, which get one auto-generated source. Multi-source DBs
+    can have several (Notion-side migration outcome or explicit user setup).
+
+    Returns (list_of_data_source_ids, None) on success — at least one ID
+    when the DB exists. Returns ([], error_str) when retrieval fails or
+    the response shape is missing data_sources (older DB pre-migration).
+    """
+    body, err, _ = http_request("GET", f"/databases/{database_id}", token)
+    if err:
+        return [], f"retrieve_database:{err}"
+    data_sources = body.get("data_sources") or []
+    ds_ids = [ds.get("id") for ds in data_sources if ds.get("id")]
+    if not ds_ids:
+        return [], "no_data_sources"
+    return ds_ids, None
+
+
+def _query_paginated(endpoint: str, token: str, base_payload: dict, limit: Optional[int] = None) -> tuple[list, Optional[str], int]:
+    """Drain pagination at `endpoint` (POST). Returns (rows, error_str, last_status).
+    Honours `limit` as an early-exit (the caller will slice precisely afterwards).
+    """
+    rows: list = []
+    cursor = None
+    while True:
+        payload = dict(base_payload)
+        if cursor:
+            payload["start_cursor"] = cursor
+        body, err, status = http_request("POST", endpoint, token, payload)
+        if err:
+            return rows, err, status
+        rows.extend(body.get("results", []))
+        if not body.get("has_more"):
+            break
+        cursor = body.get("next_cursor")
+        if limit and len(rows) >= limit:
+            break
+    return rows, None, 200
+
+
 def cmd_query_database(args, token):
     payload: dict = {"page_size": args.page_size}
     if args.filter:
         with open(args.filter) as f:
             payload["filter"] = json.load(f)
-    all_results = []
-    cursor = None
-    while True:
-        if cursor:
-            payload["start_cursor"] = cursor
-        body, err, status = http_request("POST", f"/databases/{args.database_id}/query", token, payload)
-        if err:
-            print(json.dumps({"error": err, "status": status}), file=sys.stderr)
+
+    # 2025-09-03: query via /data_sources/{ds_id}/query, not /databases/{id}/query.
+    # Multi-source DBs (Notion's migration may have promoted single-source DBs
+    # to the new format; some users explicitly group multiple sources) need
+    # each source queried separately; combine results before slicing to limit.
+    ds_ids, err = _resolve_data_source_ids(args.database_id, token)
+    if err:
+        # Fallback to legacy endpoint — older DBs that pre-date the migration
+        # still answer the database-level query. If this also fails, surface.
+        rows, qerr, status = _query_paginated(
+            f"/databases/{args.database_id}/query", token, payload, args.limit
+        )
+        if qerr:
+            print(json.dumps({
+                "error": qerr,
+                "status": status,
+                "stage": "query_database_legacy",
+                "resolve_data_sources_error": err,
+            }), file=sys.stderr)
             sys.exit(1)
-        all_results.extend(body.get("results", []))
-        if not body.get("has_more"):
-            break
-        cursor = body.get("next_cursor")
-        if args.limit and len(all_results) >= args.limit:
-            break
+        all_results = rows
+    else:
+        all_results: list = []
+        for ds_id in ds_ids:
+            rows, qerr, status = _query_paginated(
+                f"/data_sources/{ds_id}/query", token, payload,
+                # Subtract already-collected so per-source pagination short-circuits
+                # once we've hit the user-supplied limit across sources.
+                (args.limit - len(all_results)) if args.limit else None,
+            )
+            if qerr:
+                print(json.dumps({
+                    "error": qerr,
+                    "status": status,
+                    "stage": "query_data_source",
+                    "data_source_id": ds_id,
+                }), file=sys.stderr)
+                sys.exit(1)
+            all_results.extend(rows)
+            if args.limit and len(all_results) >= args.limit:
+                break
+
     sliced = all_results[: args.limit] if args.limit else all_results
     out = [{
         "id":         r.get("id"),
@@ -575,21 +660,37 @@ def cmd_hydrate_state(args, token):
     cloud mode. For 50 companies, it cuts hydration from ~5 minutes (50
     serial MCP calls) to ~5 seconds (parallel HTTPS).
     """
-    # 1) Query the database for all rows
-    rows = []
-    cursor = None
-    while True:
-        payload = {"page_size": 100}
-        if cursor:
-            payload["start_cursor"] = cursor
-        body, err, status = http_request("POST", f"/databases/{args.database_id}/query", token, payload)
-        if err:
-            print(json.dumps({"error": err, "status": status, "stage": "query_database"}), file=sys.stderr)
+    # 1) Query the database for all rows. Per Notion-Version 2025-09-03,
+    # databases expose a data_sources array; query each source separately
+    # (single-source DBs return one ID and this is one iteration).
+    rows: list = []
+    ds_ids, err = _resolve_data_source_ids(args.database_id, token)
+    if err:
+        # Pre-migration DB — fall back to legacy endpoint.
+        legacy_rows, qerr, status = _query_paginated(
+            f"/databases/{args.database_id}/query", token, {"page_size": 100}
+        )
+        if qerr:
+            print(json.dumps({
+                "error": qerr, "status": status,
+                "stage": "query_database_legacy",
+                "resolve_data_sources_error": err,
+            }), file=sys.stderr)
             sys.exit(1)
-        rows.extend(body.get("results", []))
-        if not body.get("has_more"):
-            break
-        cursor = body.get("next_cursor")
+        rows = legacy_rows
+    else:
+        for ds_id in ds_ids:
+            src_rows, qerr, status = _query_paginated(
+                f"/data_sources/{ds_id}/query", token, {"page_size": 100}
+            )
+            if qerr:
+                print(json.dumps({
+                    "error": qerr, "status": status,
+                    "stage": "query_data_source",
+                    "data_source_id": ds_id,
+                }), file=sys.stderr)
+                sys.exit(1)
+            rows.extend(src_rows)
 
     # 2) For each row, parallel-fetch the body (children blocks)
     state = {}
