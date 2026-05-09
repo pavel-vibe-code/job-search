@@ -191,23 +191,41 @@ def fetch_active_ids_teamtailor(slug: str, **_) -> Tuple[set, Optional[str]]:
 
 
 def fetch_active_ids_homerun(slug: str, **_) -> Tuple[set, Optional[str]]:
-    """Homerun — public job-board API at api.homerun.co/v1/jobs/?company_subdomain=<slug>.
+    """Homerun — try the JSON API first, fall back to the Atom feed at
+    feed.homerun.co/<slug>. Mirrors the fallback logic in fetch-and-diff
+    so validate-jobs and fetch-and-diff agree on what's active for the
+    same board (otherwise candidates fetched via feed would consistently
+    fail validation).
 
-    Returns array of jobs with `id` field. Companies use <slug>.homerun.co for
-    user-facing pages but the API is centralized.
+    Atom feed entry IDs are URN-shaped (tag:...:job_<id>); we strip to the
+    final segment so the ID matches what fetch-and-diff produces.
     """
     data, err = http_get(HOMERUN_API.format(slug=slug))
-    if err:
-        return set(), err
+    if not err:
+        try:
+            body = json.loads(data.decode("utf-8"))
+            items = body.get("jobs", body) if isinstance(body, dict) else body
+            if isinstance(items, list):
+                return {str(j.get("id")) for j in items if j.get("id")}, None
+        except Exception:
+            pass  # fall through to feed
+    # API failed or returned non-JSON — try Atom feed fallback
+    feed_data, feed_err = http_get(
+        f"https://feed.homerun.co/{slug}", accept="application/atom+xml"
+    )
+    if feed_err:
+        return set(), f"api:{err or 'parse'}|feed:{feed_err}"
     try:
-        body = json.loads(data.decode("utf-8"))
-        # Response shape may be {"jobs": [...]} or a bare array — handle both
-        items = body.get("jobs", body) if isinstance(body, dict) else body
-        if not isinstance(items, list):
-            return set(), "unexpected_shape"
-        return {str(j.get("id")) for j in items if j.get("id")}, None
-    except Exception as e:
-        return set(), f"parse:{e}"
+        root = ET.fromstring(feed_data)
+    except ET.ParseError as e:
+        return set(), f"feed_parse:{e}"
+    ns = {"a": "http://www.w3.org/2005/Atom"}
+    ids = set()
+    for entry in root.findall("a:entry", ns):
+        atom_id = (entry.findtext("a:id", "", ns) or "").strip()
+        if atom_id:
+            ids.add(atom_id.rsplit("/", 1)[-1])
+    return ids, None
 
 
 def fetch_active_ids_smartrecruiters(slug: str, **_) -> Tuple[set, Optional[str]]:
