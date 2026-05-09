@@ -1,0 +1,26 @@
+{
+  "_comment": "Notion property schema for the AI 50 Run Log database. Added in v1.2.0. One row per Routine fire, capturing version, counts, errors, and token/cost metrics. Sortable + filterable for time-series debugging ('which run added Cyera as broken?', 'when did 403s start on Botify?', 'which versions ran in the last 30 days?'). Used by setup wizard for first-time creation AND by jobs-run for runtime auto-creation when discover returns no run_log_database_id (existing-installs migration path). Body of each row carries the full structured banner verbatim so opening a row gives the same view as the run-time output.",
+  "_versioning_note": "Status select options + property names are pinned. Adding new properties is forward-compatible (older runs have null for new fields). Removing or renaming requires a Notion-side rename + a migration script.",
+
+  "Run Date":             {"title": {}},
+  "Version":              {"rich_text": {}},
+  "Status":               {"select": {"options": [
+    {"name": "ok",      "color": "green"},
+    {"name": "partial", "color": "yellow"},
+    {"name": "error",   "color": "red"}
+  ]}},
+  "Companies Configured": {"number": {}},
+  "Companies Checked":    {"number": {}},
+  "Companies Errored":    {"number": {}},
+  "Companies Skipped":    {"number": {}},
+  "Total Jobs in ATS":    {"number": {}},
+  "New Candidates":       {"number": {}},
+  "Tracker Writes":       {"number": {}},
+  "Hot Matches":          {"number": {}},
+  "Tokens Input":         {"number": {}},
+  "Tokens Output":        {"number": {}},
+  "Estimated Cost":       {"number": {}},
+  "Errors":               {"rich_text": {}},
+  "Hot List URL":         {"url": {}},
+  "Notes":                {"rich_text": {}}
+}

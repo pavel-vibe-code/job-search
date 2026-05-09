@@ -23,9 +23,19 @@ Per-user IDs are NOT in the repo. They live in `./state/cached-ids.json` (gitign
 
 ### Step P-0a — Read plugin version
 
-Read `./VERSION` (single-line plain text, e.g. `1.1.2`). Hold the version string for the run summary. This is the canonical plugin version — used in the run-summary banner so it's immediately visible whether a routine is on the latest code or running stale.
+Read `./VERSION` (single-line plain text, e.g. `1.1.3`). Hold the version string for the run summary. This is the canonical plugin version.
 
 If `./VERSION` is missing (extremely old plugin install pre-v1.1.2), use the literal string `unknown` and add a note in the summary: *"VERSION file missing — refresh the routine to pull latest plugin code."*
+
+### Step P-0b — Announce version (MANDATORY before any pass starts)
+
+Print this line **as the FIRST user-facing output of the run**, before pre-flight or any pipeline pass:
+
+```
+Running AI 50 Job Search v{plugin_version} — pre-flight starting…
+```
+
+This is non-negotiable. Surfacing the version at run start gives the user immediate visibility into which plugin code is executing — the most common diagnostic question when a routine misbehaves is "is the routine on the latest code or stale?" Version-at-start answers that in one line, regardless of whether the run later succeeds or fails or skips the closing banner.
 
 ### Step P-0 — Setup check
 
@@ -83,7 +93,7 @@ The script returns JSON with one entry per artifact. Each entry has:
 | `missing`    | RECREATE (see below)                         | ABORT — direct user to re-run setup |
 | `no_access`  | ABORT — token can't see this page (workspace mismatch?) | ABORT — same |
 
-**Recreating a missing artifact** (only `recreate_ok` types — parent_page, tracker_db, hot_list_page, state_db):
+**Recreating a missing artifact** (only `recreate_ok` types — parent_page, tracker_db, hot_list_page, state_db, run_log_db):
 
 1. **Determine the parent** for non-parent_page artifacts: parent = the resolved `parent_page` ID from this discover result.
 
@@ -105,6 +115,12 @@ The script returns JSON with one entry per artifact. Each entry has:
      --parent-page-id <parent_id> \
      --title          "<connectors.json[notion.names.state_db]>" \
      --schema         ./scripts/schemas/state_db.json
+
+   # run_log_db (v1.2.0+)
+   python3 ./scripts/notion-api.py create-database \
+     --parent-page-id <parent_id> \
+     --title          "<connectors.json[notion.names.run_log_db]>" \
+     --schema         ./scripts/schemas/run_log_db.json
 
    # parent_page or hot_list_page (no schema; just create as a page)
    #   prepare a 1-element JSON array [{"properties": {"title": "<name>"}, "content": "..."}]
@@ -444,7 +460,16 @@ If gating blocks: skip silently. The user can always invoke `recycle feedback` m
 
 **Manual invocation always works** regardless of Pass 6 gating. The user can run `recycle feedback` locally any time; if local cached-ids drifts from cloud, the skill's defensive `discover` (Step 1) handles it.
 
-## Output
+## Step F — Final summary (MANDATORY — always render, even on no-op runs)
+
+After Pass 6 completes (or is skipped), the orchestrator **MUST render the run-summary banner below**. This is not an optional template — it's a required procedural step.
+
+Render the banner even when:
+- The run produced 0 candidates / 0 new jobs / 0 LLM calls
+- Every pass was skipped or short-circuited
+- An error occurred mid-pipeline (in which case fill in what's known, mark the rest with `error:` lines)
+
+Skipping the banner is a regression — the user uses it to verify the version, see what was checked, and confirm the run completed. Treat it as the run's commit, not its appendix.
 
 ```
 ## AI 50 Job Search v{plugin_version} — {date}
@@ -483,6 +508,46 @@ Permanently skipped:
 ```
 
 If zero qualifying roles this run, say so explicitly. Don't pad.
+
+### Step F.1 — Persist run to Run Log DB (v1.2.0+)
+
+Immediately after rendering the banner, write a single row to the Run Log database (`run_log_database_id` from cached-ids.json) capturing the same metrics structurally. This makes runs queryable over time — see "is the routine actually firing weekly?", "when did Cyera start 403'ing?", "which versions ran in the last 30 days?".
+
+**Skip Run Log write if `run_log_database_id` is missing** (existing pre-v1.2.0 install where discover hasn't auto-created the DB yet). In that case: render the banner anyway, print *"Note: Run Log DB missing — first v1.2.0 fire will auto-create it via discover; future runs will log here."* and continue. The orchestrator's discover step (P-3) is responsible for creating the DB on first sight; this step just consumes the resulting ID.
+
+**Row payload** (use `notion-api.py create-pages` with `--parent-id <run_log_database_id> --parent-type database`):
+
+```json
+{
+  "properties": {
+    "Run Date":             "{ISO 8601 datetime, second precision}",
+    "Version":              "{plugin_version from VERSION file}",
+    "Status":               "ok | partial | error",
+    "Companies Configured": <int>,
+    "Companies Checked":    <int>,
+    "Companies Errored":    <int>,
+    "Companies Skipped":    <int>,
+    "Total Jobs in ATS":    <int>,
+    "New Candidates":       <int>,
+    "Tracker Writes":       <int>,
+    "Hot Matches":          <int>,
+    "Tokens Input":         <int>,
+    "Tokens Output":        <int>,
+    "Estimated Cost":       <float — USD, 2 decimals>,
+    "Errors":               "{multi-line, one per company: '<name> (<ats>): <error>'}",
+    "Hot List URL":         "{this run's hot-list page URL or empty string}",
+    "Notes":                "{free-form — anomalies like 'cleaned 5 dup state rows' or 'streak threshold breached for <co>'}"
+  },
+  "content": "{the full structured banner text from Step F, verbatim}"
+}
+```
+
+**Status determination**:
+- `ok`: every pass completed cleanly; `Companies Errored == 0`
+- `partial`: some passes errored or `Companies Errored > 0` but the run produced output
+- `error`: pipeline aborted before Pass 4 (state never persisted) — banner still renders with error-fill values
+
+**Don't fail the run on Run Log write failure.** If the create-pages call fails (network, schema mismatch, etc.), log a warning to stderr and continue. The banner is the canonical output; Run Log is supplementary. A single missed log entry shouldn't break the run.
 
 ### Token + cost aggregation (v3.0.5+)
 

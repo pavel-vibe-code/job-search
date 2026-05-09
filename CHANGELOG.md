@@ -6,6 +6,26 @@ All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Chang
 
 ---
 
+## [1.2.0] — 2026-05-09 — Run Log DB + version-at-start
+
+**Persistent run telemetry in Notion.** Each routine fire now writes a row to a new Run Log database — version, counts, errors, token usage, all queryable over time. Plus a defensive "version announcement" at run start so the version is visible mid-trace, not only in the final banner.
+
+### Added
+- **Run Log database** — new `recreate_ok` Notion artifact, schema at `scripts/schemas/run_log_db.json`. One row per Routine fire with: Run Date, Version, Status (`ok` / `partial` / `error`), Companies Configured / Checked / Errored / Skipped, Total Jobs in ATS, New Candidates, Tracker Writes, Hot Matches, Tokens Input / Output, Estimated Cost, Errors (multi-line), Hot List URL, Notes. Body of each row carries the full structured banner verbatim.
+- **`run_log_db`** added to `DISCOVER_SPEC` in `notion-api.py` and to `notion.names` in `connectors.json` (default name: `AI 50 Run Log`). Auto-created by jobs-run on first fire post-upgrade — no setup-wizard re-run required.
+- **`Step P-0b`** in `jobs-run`: the orchestrator now prints `Running AI 50 Job Search v{plugin_version} — pre-flight starting…` as the first user-facing line of every run. Surfaces the version regardless of whether the run completes, errors, or skips the closing banner.
+- **`Step F`** (renamed from "## Output"): the run-summary banner is now framed as a MANDATORY procedural step, not an optional template. Render even on no-op runs.
+- **`Step F.1`**: writes the run-log row after the banner. Failure to write the log row does NOT fail the run (banner is canonical).
+
+### Changed
+- `jobs-run/SKILL.md` Step P-3 recreate-table now lists `run_log_db` as a `recreate_ok` artifact alongside parent_page / tracker_db / hot_list_page / state_db.
+
+### Migration
+- **Existing routines**: no setup-wizard re-run needed. On the first jobs-run fire after upgrading to v1.2.0, the orchestrator's discover step sees `run_log_database_id` missing in cached-ids, creates the database under your existing parent page, and starts logging from that fire. Backfill is not a thing — log starts from the first post-v1.2.0 run.
+- **Cloud Routine users specifically**: recreate the routine to pull v1.2.0 plugin code. The first fire under v1.2.0 will create the Run Log DB and seed its first row.
+
+---
+
 ## [1.1.2] — 2026-05-09 — version surface
 
 **Single source of truth for plugin version.** Adds a top-level `VERSION` file and surfaces it in the run-summary banner so users (and routines) can immediately see whether they're on the latest plugin code or running stale.

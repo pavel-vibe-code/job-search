@@ -16,6 +16,7 @@
       "tracker_db":               "Job Tracker",
       "hot_list_page":            "Hot Lists",
       "state_db":                 "AI50 State",
+      "run_log_db":               "AI 50 Run Log",
       "profile_page":             "AI 50 Profile",
       "extended_companies_page":  "Extended Companies List"
     },

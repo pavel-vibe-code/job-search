@@ -764,6 +764,7 @@ DISCOVER_SPEC = {
     "tracker_db":              ("tracker_database_id",        "database", "recreate_ok"),
     "hot_list_page":           ("hot_list_parent_page_id",    "page",     "recreate_ok"),
     "state_db":                ("tracker_state_database_id",  "database", "recreate_ok"),
+    "run_log_db":              ("run_log_database_id",        "database", "recreate_ok"),
     "profile_page":            ("profile_page_id",            "page",     "abort_if_missing"),
     "extended_companies_page": ("extended_companies_page_id", "page",     "abort_if_missing"),
 }
