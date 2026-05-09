@@ -1,7 +1,6 @@
 ---
 name: jobs-recalibrate
-description: Tune the scoring rubric in profile.json based on what you saw in the last run. Show the top + bottom of the hot list, ask the user what's off, propose concrete profile mutations, write the updated profile back to Notion (cloud mode) or to ./config/profile.json (local mode). Manual-dialog version of the v3.0 learning loop. Invoke when the user says "recalibrate the scoring", "adjust the scoring rubric", "the hot list looks off", or similar.
-version: 2.5.2
+description: Tune the scoring rubric in profile.json based on what you saw in the last run. Show the top + bottom of the hot list, ask the user what's off, propose concrete profile mutations, write the updated profile back to Notion (cloud mode) or to ./config/profile.json (local mode). Manual-dialog companion to the automated learning loop in jobs-recycle-feedback. Invoke when the user says "recalibrate the scoring", "adjust the scoring rubric", "the hot list looks off", or similar.
 ---
 
 ## What this skill does

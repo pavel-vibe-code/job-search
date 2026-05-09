@@ -1,7 +1,6 @@
 ---
 name: jobs-settings
 description: Edit any field in your AI 50 Profile interactively, one field at a time. Use this for ad-hoc updates without re-running the full setup wizard or hand-editing JSON. Preserves every field you don't explicitly change. Trigger phrases include "settings", "edit profile", "update profile", "change my settings", "tune my profile", "/jobs-settings".
-version: 1.0.0
 ---
 
 ## What this skill does

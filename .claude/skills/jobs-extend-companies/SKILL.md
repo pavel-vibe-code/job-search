@@ -1,7 +1,6 @@
 ---
 name: jobs-extend-companies
 description: Add, remove, or update companies on top of the AI 50 baseline — interactive dialogue, no JSON editing. Auto-detects ATS from pasted careers-page URLs via the ats_adapters registry. Supports bulk-paste of URLs (all-at-once add) and inline editing. Persists changes to Notion (cloud mode) or config/custom-companies.json (local mode). Invoke when the user says "extend companies", "add company", "add custom company", "remove company", "change tracked companies", "edit my companies list", "manage companies", or similar phrasing.
-version: 4.0.0
 ---
 
 ## What this skill does

@@ -1,7 +1,6 @@
 ---
 name: jobs-scrape-page
 description: Extract structured job listings from any careers-page URL via the scrape-extract agent. Useful for testing extraction quality before adding a company as scrape-tracked, OR for ad-hoc one-off lookups outside the regular pipeline. Trigger phrases: "scrape this page", "extract jobs from this URL", "what's listed at <url>", "test scrape on".
-version: 4.0.0
 ---
 
 ## What this skill does

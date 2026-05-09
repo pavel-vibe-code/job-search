@@ -6,6 +6,26 @@ All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Chang
 
 ---
 
+## [1.1.2] — 2026-05-09 — version surface
+
+**Single source of truth for plugin version.** Adds a top-level `VERSION` file and surfaces it in the run-summary banner so users (and routines) can immediately see whether they're on the latest plugin code or running stale.
+
+Motivated by a routine fire that returned 403s on companies that should have been routed to the new (v1.1.0) deterministic adapters — the routine was running pre-v1.1.0 plugin code, but there was no easy way to confirm that. The misleading per-skill `version:` frontmatter (left over from pre-v1.0 internal numbering) showed values like `3.4.0` and `4.0.0` that looked like the plugin version but weren't.
+
+### Added
+- `VERSION` file at the plugin root — single-line plain text with the canonical plugin version (`1.1.2`). Read by the orchestrator at pre-flight Step P-0a.
+- `jobs-run` run-summary banner now includes the version: `## AI 50 Job Search v1.1.2 — {date}`.
+
+### Changed
+- Per-skill `version:` and `metadata.version:` frontmatter fields removed across all skills (jobs-run, jobs-extend-companies, jobs-recalibrate, jobs-recycle-feedback, jobs-rescore, jobs-scrape-page, jobs-settings, jobs-setup, jobs). They were drifting per-skill metadata that looked like plugin versions but weren't — the VERSION file is now the only source.
+- `jobs-recycle-feedback` description: removed stale "v3.0 learning loop" reference (carry-over from pre-public era).
+- `jobs-recalibrate` description: rephrased to reference `jobs-recycle-feedback` instead of "v3.0".
+
+### Migration note
+- If your Cloud Routine is still on a pre-v1.1.2 install (banner says `AI 50 Job Search — {date}` without a `vX.Y.Z`), you need to refresh the routine — it's pulling stale plugin code that doesn't have the new ATS adapters / scrape resilience / Notion API fixes from v1.1.0+.
+
+---
+
 ## [1.1.1] — 2026-05-09 — doc patch
 
 Backfills CHANGELOG entries for v1.0.1, v1.0.2, and v1.1.0, which were tagged and released without their corresponding changelog updates. No code changes.

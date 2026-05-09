@@ -1,7 +1,6 @@
 ---
 name: jobs
 description: Show the menu of all AI 50 Job Search commands available in this Claude Code session. Use this when the user is unsure what they can do, or wants a quick reference of available skills. Trigger phrases include "jobs", "job search help", "what can the job search do", "show me the commands", "menu".
-version: 1.0.0
 ---
 
 ## What this skill does

@@ -1,7 +1,6 @@
 ---
 name: jobs-recycle-feedback
-description: Reads recent user feedback labels in the Notion tracker (Match Quality + Feedback Comment columns), synthesizes anti-patterns and few-shot examples from disagreements between LLM verdict (Match) and user verdict (Match Quality), and updates the profile so future Pass 3 LLM scoring runs incorporate the learning. Closes the v3.0 learning loop. Invoke explicitly via "recycle feedback" or "update profile from labels", or run automatically at end of each cloud Routine fire (when v3.0.0 orchestrator integration ships).
-version: 3.0.0
+description: Reads recent user feedback labels in the Notion tracker (Match Quality + Feedback Comment columns), synthesizes anti-patterns and few-shot examples from disagreements between LLM verdict (Match) and user verdict (Match Quality), and updates the profile so future Pass 3 LLM scoring runs incorporate the learning. Closes the learning loop introduced in v1.0.0. Invoke explicitly via "recycle feedback" or "update profile from labels", or as Pass 6 of the orchestrator (gated to fire at most once per 7 days).
 ---
 
 ## What this skill does

@@ -7,7 +7,6 @@ description: >
   "scan for jobs", "check for new roles", "run AI 50 search", "update my job tracker",
   "find jobs", "what's new on the AI 50 list".
 metadata:
-  version: "3.4.0"
   author: "Pavel Malyshev"
   edition: "Claude Code / Routines"
 ---
@@ -21,6 +20,12 @@ State storage:
 Per-user IDs are NOT in the repo. They live in `./state/cached-ids.json` (gitignored). The runtime resolves them via `notion-api.py discover` on every run — fast on cache hit, self-healing on cache miss.
 
 ## Pre-flight
+
+### Step P-0a — Read plugin version
+
+Read `./VERSION` (single-line plain text, e.g. `1.1.2`). Hold the version string for the run summary. This is the canonical plugin version — used in the run-summary banner so it's immediately visible whether a routine is on the latest code or running stale.
+
+If `./VERSION` is missing (extremely old plugin install pre-v1.1.2), use the literal string `unknown` and add a note in the summary: *"VERSION file missing — refresh the routine to pull latest plugin code."*
 
 ### Step P-0 — Setup check
 
@@ -442,7 +447,7 @@ If gating blocks: skip silently. The user can always invoke `recycle feedback` m
 ## Output
 
 ```
-## AI 50 Job Search — {date}
+## AI 50 Job Search v{plugin_version} — {date}
 
 Fetch: {N} companies checked | {N} skipped | {N} errored
 Total jobs in ATS: {N} | New this run: {N} raw → {N} after filter

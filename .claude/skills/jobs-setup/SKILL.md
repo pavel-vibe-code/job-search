@@ -7,7 +7,6 @@ description: >
   "run onboarding", "guided setup", "start onboarding", "walk me through setup",
   "first time setup", "setup wizard", "I just installed this".
 metadata:
-  version: "2.3.0"
   edition: "Claude Code / Routines"
 ---
 

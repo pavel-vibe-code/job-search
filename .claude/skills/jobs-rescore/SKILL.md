@@ -1,7 +1,6 @@
 ---
 name: jobs-rescore
 description: Re-evaluate existing tracker rows by re-running the v3 scoring prompt against them. Use this to fix rows with empty Why Fits / Key Factors (data debt from earlier runs that didn't populate them), to rescore after a profile change, or to upgrade past Sonnet-scored entries to Opus quality. Updates Why Fits, Key Factors, and Match in place; preserves user-set fields (Match Quality, Status, Feedback Comment, Recycled). Trigger phrases include "jobs-rescore", "re-evaluate tracker", "fix empty rationales", "re-run scoring on tracker", "update rationales".
-version: 1.0.0
 ---
 
 ## What this skill does
