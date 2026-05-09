@@ -6,6 +6,42 @@ All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Chang
 
 ---
 
+## [1.3.0] — 2026-05-09 — sitemap fallback for CDN-gated adapters + 5xx retry
+
+**403 resilience for cloud-routine datacenter IPs.** Cloud routines run from datacenter ranges that some CDN-fronted ATSes (Recruitee, Teamtailor, Homerun, Personio, BambooHR) reflexively bot-gate, even though the same code works fine from residential IPs. v1.3.0 adds a sitemap-fallback path: when the primary API returns 403, fall through to the company's public sitemap, which is universally cached at the CDN edge for SEO and not bot-gated.
+
+Plus a single-retry on 5xx errors so transient ATS overload (Applied Intuition + Clay both 503'd in the v1.2.1 fire) self-heals.
+
+### Added
+- **`_discover_jobs_in_sitemap(careers_host, job_path_substring)`** generic helper. Probes 5 common sitemap paths (`/sitemap.xml`, `/sitemap_index.xml`, `/career-sitemap.xml`, `/careers-sitemap.xml`, `/jobs-sitemap.xml`) under any host, parses XML, returns triples of `(url, slug, slug-derived-title)` for every entry matching the job-path substring.
+- **`_http_get_with_retry()`** wrapper with one retry on 5xx (linear, ~1s pause, no exponential backoff library). Does NOT retry 4xx (those are deterministic — no point hammering).
+- **`_homerun_sitemap_fallback()`** — third-tier fallback layered on top of Homerun's existing API → feed chain. Activates only when both API and feed return errors.
+
+### Changed — adapter wiring
+On `http_403`, these adapters now fall through to sitemap discovery, returning slug-derived job entries shaped to match each normaliser's expected dict:
+
+| Adapter | Sitemap host | Job path filter | Production verified |
+|---|---|---|---|
+| **Recruitee** | `<slug>.recruitee.com` | `/o/` | ✅ Aikido returns 43 jobs via sitemap when API 403s |
+| **Teamtailor** | `<slug>.teamtailor.com` | `/jobs/` | defensive — Teamtailor doesn't currently expose per-board sitemaps for typical configs, but the path activates if they ever do |
+| **Homerun** | `<slug>.homerun.co` | `/` (with hyphen-filter) | defensive — Homerun's per-board sitemaps don't currently list job pages |
+| **Personio** | `<slug>.jobs.personio.de` | `/job/` | defensive — sitemap not currently exposed |
+| **BambooHR** | `<slug>.bamboohr.com` | `/careers/` | defensive — sitemap not currently exposed |
+
+The defensive paths are no-ops at fetch time when the host doesn't expose a sitemap (5 quick 404s, ~5 seconds total). Future-proof: if any of these ATSes adds sitemaps later, the fallback activates without further code changes.
+
+### Changed — 5xx retry across all adapters
+Ashby, Greenhouse (both classic + EU hosts), Lever, Workable, SmartRecruiters now route through `_http_get_with_retry`. Single retry on 5xx — Applied Intuition / Clay-style 503s self-heal in the same run rather than waiting for the next routine fire.
+
+### Not in scope
+- **Comeet sitemap fallback**: Comeet's design is fundamentally different (HTML-token scrape, not direct API). Cyera is the only Comeet customer in the AI 50 baseline, currently 403'ing; would need a separate per-company sitemap host config (`cyera.io/sitemap.xml` rather than `www.comeet.com/sitemap.xml`). Tracked for a future patch.
+- **`validate-jobs.py` symmetry**: the validate-jobs path's active-id fetcher in `ats_adapters.py` does NOT yet fall back to sitemap on 403. So sitemap-derived candidates may land in the tracker as `Status: Uncertain` until v1.3.1 mirrors the fallback there. Functional but degraded.
+
+### Tests
+- 176 unit tests still pass. Sitemap-discovery paths are not directly unit-tested (network-bound) but were verified end-to-end by monkey-patching `http_get` to force a 403 and confirming the Recruitee sitemap fallback returns 43 normalised jobs for Aikido Security.
+
+---
+
 ## [1.2.2] — 2026-05-09 — banner counts include extended companies
 
 **Counting fix.** v1.2.1's first run revealed the banner and Run Log row were under-counting by ignoring the user's extended-companies list — `Companies Configured: 50` instead of `68`, `Total Jobs in ATS: 4,975` instead of `~6,710`. The actual fetch loop hit all 68 companies; only the reporting was wrong.

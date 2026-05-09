@@ -42,6 +42,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -133,6 +134,113 @@ def http_get(url: str, accept: str = "application/json") -> Tuple[Optional[bytes
         return None, f"url_error:{e.reason}"
     except Exception as e:
         return None, f"error:{e}"
+
+
+# ── Sitemap fallback (v1.3.0) ─────────────────────────────────────────────────
+#
+# Cloudflare-fronted ATS endpoints (Recruitee / Teamtailor / Homerun / Personio /
+# BambooHR — all CDN-fronted, several with bot-detection turned on) reliably 403
+# datacenter IPs. Cloud routines run from such IPs, so the same adapter code that
+# works fine from a residential connection produces empty fetches in cloud.
+#
+# Workaround: when the primary API returns 403, fall through to the company's
+# public sitemap, which is universally cached at the CDN edge for SEO and not
+# bot-gated (gating sitemap.xml would deindex the company from search engines —
+# almost no Cloudflare config does that).
+#
+# Sitemap-derived data is degraded: URL + slug-derived title only, no location
+# or department inline. But that's enough for the candidate to land in the
+# tracker; downstream JD re-fetch (jobs-rescore) can backfill richer fields.
+
+SITEMAP_CANDIDATE_PATHS = [
+    "/sitemap.xml",
+    "/sitemap_index.xml",
+    "/career-sitemap.xml",
+    "/careers-sitemap.xml",
+    "/jobs-sitemap.xml",
+]
+ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
+SITEMAP_NS = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+
+
+def _http_get_with_retry(url: str, accept: str = "application/json", retries: int = 1) -> Tuple[Optional[bytes], Optional[str]]:
+    """`http_get` with simple linear retry on 5xx (transient server errors).
+
+    503 / 502 / 504 frequently surface during normal ATS load spikes (Applied
+    Intuition + Clay both 503'd in the v1.2.1 fire) — a single retry resolves
+    most of them without needing exponential backoff or a separate retry layer.
+    Does NOT retry 4xx (those are deterministic — no point hammering).
+    """
+    data, err = http_get(url, accept=accept)
+    if err and err.startswith("http_5") and retries > 0:
+        # One retry on 5xx — quick (~1s pause, no backoff library)
+        time.sleep(1.0)
+        data, err = http_get(url, accept=accept)
+    return data, err
+
+
+def _extract_sitemap_loc_urls(xml_bytes: bytes, url_substring_filter: str = "") -> Tuple[list, Optional[str]]:
+    """Parse a sitemap (or sitemap index) and return all <loc> URLs that match
+    `url_substring_filter`. Empty filter returns all locs.
+
+    Sitemap index entries (i.e. <loc> pointing to other sitemaps, not pages)
+    are returned as-is — caller decides whether to recurse.
+    """
+    try:
+        root = ET.fromstring(xml_bytes)
+    except ET.ParseError as e:
+        return [], f"sitemap_parse:{e}"
+    locs: list = []
+    # Both sitemap and sitemapindex use <url><loc> or <sitemap><loc>; iter handles both
+    for loc_el in root.iter():
+        tag = loc_el.tag.split("}", 1)[1] if "}" in loc_el.tag else loc_el.tag
+        if tag == "loc" and loc_el.text:
+            url = loc_el.text.strip()
+            if not url_substring_filter or url_substring_filter in url:
+                locs.append(url)
+    return locs, None
+
+
+def _slug_to_title(slug: str) -> str:
+    """Convert URL slug to readable title: 'team-lead-infrastructure' → 'Team Lead Infrastructure'."""
+    return " ".join(word.capitalize() for word in slug.replace("_", "-").split("-") if word)
+
+
+def _discover_jobs_in_sitemap(careers_host: str, job_path_substring: str) -> Tuple[list, Optional[str]]:
+    """Generic sitemap discovery. Probes common sitemap paths under `careers_host`,
+    finds entries containing `job_path_substring`, returns a list of triples:
+
+        [(full_url, slug, slug_derived_title), ...]
+
+    Each adapter wraps these into its own per-API shape (matching what its
+    normaliser expects). This indirection keeps the sitemap layer reusable
+    while letting normalisers stay unchanged.
+
+    Returns ([], err) if no sitemap path returns useful URLs.
+    """
+    last_err = None
+    for path in SITEMAP_CANDIDATE_PATHS:
+        url = careers_host.rstrip("/") + path
+        data, err = http_get(url, accept="application/xml")
+        if err:
+            last_err = err
+            continue
+        locs, perr = _extract_sitemap_loc_urls(data, url_substring_filter=job_path_substring)
+        if perr:
+            last_err = perr
+            continue
+        triples = []
+        for loc in locs:
+            # Trailing slug after the matching segment is the job ID
+            after = loc.split(job_path_substring, 1)[-1].strip("/")
+            if not after or "/" in after:
+                # /jobs/  or /jobs/department/foo — skip section landings
+                continue
+            triples.append((loc, after, _slug_to_title(after)))
+        if triples:
+            return triples, None
+        # Sitemap fetched but no job-shaped URLs in it — try next candidate.
+    return [], f"sitemap_fallback_failed:{last_err or 'no_candidates_matched'}"
 
 
 # ── Region classification + remote scoring ───────────────────────────────────
@@ -366,7 +474,7 @@ def score_remote(workplace_type: str, region: str, home_region: str = None,
 # ── Fetchers ──────────────────────────────────────────────────────────────────
 
 def fetch_ashby(company: dict) -> Tuple[list, Optional[str]]:
-    data, err = http_get(ASHBY_API.format(slug=company["slug"]))
+    data, err = _http_get_with_retry(ASHBY_API.format(slug=company["slug"]))
     if err:
         return [], err
     try:
@@ -391,7 +499,7 @@ def fetch_greenhouse(company: dict) -> Tuple[list, Optional[str]]:
     """
     last_err = None
     for host in GREENHOUSE_API_HOSTS:
-        data, err = http_get(host + f"/v1/boards/{company['slug']}/jobs")
+        data, err = _http_get_with_retry(host + f"/v1/boards/{company['slug']}/jobs")
         if not err:
             try:
                 return json.loads(data.decode("utf-8")).get("jobs", []), None
@@ -408,7 +516,7 @@ LEVER_API = "https://api.lever.co/v0/postings/{slug}?mode=json"
 
 
 def fetch_lever(company: dict) -> Tuple[list, Optional[str]]:
-    data, err = http_get(LEVER_API.format(slug=company["slug"]))
+    data, err = _http_get_with_retry(LEVER_API.format(slug=company["slug"]))
     if err:
         return [], err
     try:
@@ -433,7 +541,26 @@ TT_NS          = {"tt": "https://teamtailor.com/locations"}
 
 
 def fetch_teamtailor(company: dict) -> Tuple[list, Optional[str]]:
-    data, err = http_get(TEAMTAILOR_API.format(slug=company["slug"]), accept="application/rss+xml")
+    data, err = _http_get_with_retry(TEAMTAILOR_API.format(slug=company["slug"]), accept="application/rss+xml")
+    if err == "http_403":
+        # v1.3.0: Cloudflare bot-gate fallback via sitemap.
+        triples, sm_err = _discover_jobs_in_sitemap(
+            f"https://{company['slug']}.teamtailor.com", "/jobs/",
+        )
+        if triples:
+            # Shape to match what normalise_teamtailor expects (RSS-like dict)
+            return [{
+                "guid":         slug,
+                "title":         title,
+                "link":          url,
+                "description":   "",
+                "pubDate":       "",
+                "remoteStatus":  "",
+                "department":    "",
+                "role":          "",
+                "locations":     [],
+            } for (url, slug, title) in triples], None
+        return [], f"api:{err}|{sm_err}"
     if err:
         return [], err
     try:
@@ -516,14 +643,47 @@ def _fetch_homerun_feed(slug: str) -> Tuple[list, Optional[str]]:
     return out, None
 
 
+def _homerun_sitemap_fallback(slug: str) -> Tuple[list, Optional[str]]:
+    """v1.3.0: third-tier fallback when both API and feed return errors.
+    Tries <slug>.homerun.co/sitemap.xml — Cloudflare-cached, bot-gate exempt.
+    Sitemap URLs have no clear /jobs/ prefix; Homerun job URLs are
+    <slug>.homerun.co/<job-slug> directly. So we filter to non-root paths.
+    """
+    triples, err = _discover_jobs_in_sitemap(
+        f"https://{slug}.homerun.co", "/",
+    )
+    # Filter out generic site pages — keep only entries whose path looks like
+    # a job slug (contains a hyphen-separated phrase, not a single word landing).
+    job_triples = [t for t in triples if "-" in t[1]]
+    if not job_triples:
+        return [], err or "no_job_shaped_urls_in_sitemap"
+    return [{
+        "id":          slug_seg,
+        "title":       title,
+        "url":         url,
+        "apply_url":   url,
+        "location":    "",
+        "department":  "",
+        "remote":      None,
+        "description": "",
+        "created_at":  "",
+    } for (url, slug_seg, title) in job_triples], None
+
+
 def fetch_homerun(company: dict) -> Tuple[list, Optional[str]]:
-    data, err = http_get(HOMERUN_API.format(slug=company["slug"]))
+    data, err = _http_get_with_retry(HOMERUN_API.format(slug=company["slug"]))
     if err:
-        # Try the Atom-feed fallback. Surface the API error too if both fail.
+        # Try the Atom-feed fallback (handles 404 from the API).
         feed_jobs, feed_err = _fetch_homerun_feed(company["slug"])
-        if feed_err:
-            return [], f"api:{err}|feed:{feed_err}"
-        return feed_jobs, None
+        if not feed_err:
+            return feed_jobs, None
+        # Both API and feed failed. v1.3.0: third-tier sitemap fallback for 403.
+        if err == "http_403" or feed_err == "http_403":
+            sitemap_jobs, sm_err = _homerun_sitemap_fallback(company["slug"])
+            if sitemap_jobs:
+                return sitemap_jobs, None
+            return [], f"api:{err}|feed:{feed_err}|{sm_err}"
+        return [], f"api:{err}|feed:{feed_err}"
     try:
         body = json.loads(data.decode("utf-8"))
     except Exception as e:
@@ -553,7 +713,7 @@ def fetch_smartrecruiters(company: dict) -> Tuple[list, Optional[str]]:
     offset = 0
     last_err: Optional[str] = None
     for _page in range(20):
-        data, err = http_get(SMARTRECRUITERS_API.format(slug=company["slug"], offset=offset))
+        data, err = _http_get_with_retry(SMARTRECRUITERS_API.format(slug=company["slug"], offset=offset))
         if err:
             last_err = err
             break
@@ -583,7 +743,7 @@ WORKABLE_API = "https://apply.workable.com/api/v1/widget/accounts/{slug}"
 
 def fetch_workable(company: dict) -> Tuple[list, Optional[str]]:
     """Workable widget API. Returns the `jobs` array."""
-    data, err = http_get(WORKABLE_API.format(slug=company["slug"]))
+    data, err = _http_get_with_retry(WORKABLE_API.format(slug=company["slug"]))
     if err:
         return [], err
     try:
@@ -604,8 +764,32 @@ def fetch_recruitee(company: dict) -> Tuple[list, Optional[str]]:
     """Recruitee public offers API. Returns {offers: [...]}.
 
     Each offer has stable numeric `id` plus string `slug` used in URLs.
+
+    v1.3.0: on 403 (Cloudflare bot-gate from datacenter IPs), falls through to
+    sitemap discovery on the same subdomain. Sitemap-derived entries lack
+    location / department / description but carry URL + slug-derived title —
+    enough for tracker landing.
     """
-    data, err = http_get(RECRUITEE_API.format(slug=company["slug"]))
+    data, err = _http_get_with_retry(RECRUITEE_API.format(slug=company["slug"]))
+    if err == "http_403":
+        triples, sm_err = _discover_jobs_in_sitemap(
+            f"https://{company['slug']}.recruitee.com", "/o/",
+        )
+        if triples:
+            # Shape matches normalise_recruitee's field accesses
+            return [{
+                "id":                slug,
+                "title":              title,
+                "careers_apply_url":  url,
+                "city":               "",
+                "country_code":       "",
+                "location":           "",
+                "remote":             False,
+                "description":        "",
+                "department":         "",
+                "created_at":         "",
+            } for (url, slug, title) in triples], None
+        return [], f"api:{err}|{sm_err}"
     if err:
         return [], err
     try:
@@ -626,7 +810,31 @@ PERSONIO_API = "https://{slug}.jobs.personio.de/xml"
 
 
 def fetch_personio(company: dict) -> Tuple[list, Optional[str]]:
-    data, err = http_get(PERSONIO_API.format(slug=company["slug"]), accept="application/xml")
+    data, err = _http_get_with_retry(PERSONIO_API.format(slug=company["slug"]), accept="application/xml")
+    if err == "http_403":
+        # v1.3.0: Cloudflare bot-gate fallback via sitemap.
+        triples, sm_err = _discover_jobs_in_sitemap(
+            f"https://{company['slug']}.jobs.personio.de", "/job/",
+        )
+        if triples:
+            # Shape to match what normalise_personio expects (XML-derived dict)
+            return [{
+                "id":                  slug,
+                "name":                title,
+                "subcompany":          "",
+                "office":              "",
+                "additional_offices":  [],
+                "department":          "",
+                "recruiting_category": "",
+                "employment_type":     "",
+                "schedule":            "",
+                "seniority":           "",
+                "years_of_experience": "",
+                "office_remote":       "",
+                "created_at":          "",
+                "description":         "",
+            } for (url, slug, title) in triples], None
+        return [], f"api:{err}|{sm_err}"
     if err:
         return [], err
     try:
@@ -670,7 +878,24 @@ BAMBOOHR_API = "https://{slug}.bamboohr.com/careers/list"
 
 
 def fetch_bamboohr(company: dict) -> Tuple[list, Optional[str]]:
-    data, err = http_get(BAMBOOHR_API.format(slug=company["slug"]))
+    data, err = _http_get_with_retry(BAMBOOHR_API.format(slug=company["slug"]))
+    if err == "http_403":
+        # v1.3.0: Cloudflare bot-gate fallback via sitemap.
+        triples, sm_err = _discover_jobs_in_sitemap(
+            f"https://{company['slug']}.bamboohr.com", "/careers/",
+        )
+        if triples:
+            # Shape to match what normalise_bamboohr expects
+            return [{
+                "id":                       slug,
+                "jobOpeningName":           title,
+                "departmentLabel":          "",
+                "employmentStatusLabel":    "",
+                "location":                 {},
+                "atsLocation":              {},
+                "isRemote":                 False,
+            } for (url, slug, title) in triples], None
+        return [], f"api:{err}|{sm_err}"
     if err:
         return [], err
     try:
