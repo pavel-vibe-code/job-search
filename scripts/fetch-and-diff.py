@@ -436,22 +436,74 @@ def fetch_teamtailor(company: dict) -> Tuple[list, Optional[str]]:
         return [], f"parse_error:{e}"
 
 
-# ── Homerun (v3.1.1) ────────────────────────────────────────────────────────
-HOMERUN_API = "https://api.homerun.co/v1/jobs/?company_subdomain={slug}"
+# ── Homerun (v3.1.1 + feed fallback feature/more-ats) ──────────────────────
+# Two endpoint shapes seen in the wild:
+#   - api.homerun.co/v1/jobs/?company_subdomain={slug} — older/internal API,
+#     intermittently returns 404 even for boards that exist (gradium 2026-05).
+#   - feed.homerun.co/{slug} — Atom XML feed, publicly stable, embedded in
+#     every Homerun board's page header. We try the API first (it carries
+#     more fields), and fall back to the Atom feed when the API 404s. Feed
+#     entries get normalised into the same dict shape the API would have
+#     returned so the existing normalise_homerun() works unchanged.
+HOMERUN_API  = "https://api.homerun.co/v1/jobs/?company_subdomain={slug}"
+HOMERUN_FEED = "https://feed.homerun.co/{slug}"
+
+
+def _fetch_homerun_feed(slug: str) -> Tuple[list, Optional[str]]:
+    """Atom-feed fallback for Homerun. Returns dicts shaped like the API
+    response so normalise_homerun() works without branching."""
+    data, err = http_get(HOMERUN_FEED.format(slug=slug), accept="application/atom+xml")
+    if err:
+        return [], err
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError as e:
+        return [], f"parse_error:{e}"
+    ns = {"a": "http://www.w3.org/2005/Atom"}
+    out = []
+    for entry in root.findall("a:entry", ns):
+        title = (entry.findtext("a:title", "", ns) or "").strip()
+        link_el = entry.find("a:link", ns)
+        url = link_el.get("href") if link_el is not None else ""
+        # Atom <id> is unique per entry; Homerun's id is a tag URN — strip to
+        # the last path segment for a stable, short ID. Falls back to URL slug.
+        atom_id = (entry.findtext("a:id", "", ns) or "").strip()
+        eid = atom_id.rsplit("/", 1)[-1] if atom_id else url.rstrip("/").rsplit("/", 1)[-1]
+        summary = (entry.findtext("a:summary", "", ns) or "").strip()
+        out.append({
+            "id":          eid,
+            "title":       title,
+            "url":         url,
+            "apply_url":   url,
+            "location":    "",   # Atom feed doesn't carry it; normalise_homerun degrades gracefully
+            "department":  "",
+            "remote":      None,
+            "description": summary,
+            "created_at":  (entry.findtext("a:updated", "", ns) or "").strip(),
+        })
+    return out, None
 
 
 def fetch_homerun(company: dict) -> Tuple[list, Optional[str]]:
     data, err = http_get(HOMERUN_API.format(slug=company["slug"]))
     if err:
-        return [], err
+        # Try the Atom-feed fallback. Surface the API error too if both fail.
+        feed_jobs, feed_err = _fetch_homerun_feed(company["slug"])
+        if feed_err:
+            return [], f"api:{err}|feed:{feed_err}"
+        return feed_jobs, None
     try:
         body = json.loads(data.decode("utf-8"))
-        items = body.get("jobs", body) if isinstance(body, dict) else body
-        if not isinstance(items, list):
-            return [], "unexpected_shape"
-        return items, None
     except Exception as e:
-        return [], f"parse_error:{e}"
+        # API returned non-JSON (e.g. HTML 404 page) — treat as miss + try feed.
+        feed_jobs, feed_err = _fetch_homerun_feed(company["slug"])
+        if feed_err:
+            return [], f"api_parse:{e}|feed:{feed_err}"
+        return feed_jobs, None
+    items = body.get("jobs", body) if isinstance(body, dict) else body
+    if not isinstance(items, list):
+        return [], "unexpected_shape"
+    return items, None
 
 
 # ── SmartRecruiters (feature/more-ats Easy tier) ────────────────────────────
