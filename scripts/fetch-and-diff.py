@@ -420,20 +420,52 @@ def fetch_lever(company: dict) -> Tuple[list, Optional[str]]:
         return [], f"parse_error:{e}"
 
 
-# ── Teamtailor (v3.1.1) ─────────────────────────────────────────────────────
-TEAMTAILOR_API = "https://{slug}.teamtailor.com/api/v1/jobs?page%5Bsize%5D=200"
+# ── Teamtailor (v3.1.1, RSS in feature/more-ats) ───────────────────────────
+# Public read surface migrated from /api/v1/jobs (JSON:API) to /jobs.rss
+# sometime before 2026-05. The JSON endpoint returns 404 across every
+# board tested; the RSS feed includes title, full-HTML description, link,
+# guid (UUID), pubDate, remoteStatus, and a custom Teamtailor namespace
+# https://teamtailor.com/locations carrying <locations>/<location> and
+# <department>/<role> fields. We materialise items into dicts during
+# parse so normalise_teamtailor stays a pure transform.
+TEAMTAILOR_API = "https://{slug}.teamtailor.com/jobs.rss"
+TT_NS          = {"tt": "https://teamtailor.com/locations"}
 
 
 def fetch_teamtailor(company: dict) -> Tuple[list, Optional[str]]:
-    data, err = http_get(TEAMTAILOR_API.format(slug=company["slug"]))
+    data, err = http_get(TEAMTAILOR_API.format(slug=company["slug"]), accept="application/rss+xml")
     if err:
         return [], err
     try:
-        body = json.loads(data.decode("utf-8"))
-        # JSON:API envelope: {data: [...], included: [...], meta: {...}}
-        return body.get("data", []), None
-    except Exception as e:
+        root = ET.fromstring(data)
+    except ET.ParseError as e:
         return [], f"parse_error:{e}"
+    out = []
+    for item in root.findall(".//item"):
+        # Decode <tt:locations>/<tt:location> nested children. Each <location>
+        # has flat children (name/city/country/zip/address) under no namespace.
+        locs = []
+        locs_el = item.find("tt:locations", TT_NS)
+        if locs_el is not None:
+            for loc in locs_el.findall("tt:location", TT_NS):
+                ch = {}
+                for c in loc:
+                    tag = c.tag.split("}", 1)[1] if "}" in c.tag else c.tag
+                    ch[tag] = (c.text or "").strip()
+                if ch:
+                    locs.append(ch)
+        out.append({
+            "guid":          (item.findtext("guid") or "").strip(),
+            "title":         (item.findtext("title") or "").strip(),
+            "link":          (item.findtext("link") or "").strip(),
+            "description":   (item.findtext("description") or "").strip(),
+            "pubDate":       (item.findtext("pubDate") or "").strip(),
+            "remoteStatus":  (item.findtext("remoteStatus") or "").strip().lower(),
+            "department":    (item.findtext("tt:department", "", TT_NS) or "").strip(),
+            "role":          (item.findtext("tt:role", "", TT_NS) or "").strip(),
+            "locations":     locs,
+        })
+    return out, None
 
 
 # ── Homerun (v3.1.1 + feed fallback feature/more-ats) ──────────────────────
@@ -909,28 +941,38 @@ def normalise_lever(job: dict, company: dict) -> dict:
 
 
 def normalise_teamtailor(job: dict, company: dict) -> dict:
-    """Teamtailor JSON:API entity:
-      {id, type: "jobs", attributes: {title, body, pitch, location, language, status,
-       remote-status, employment-type, created-at, updated-at, careersite-job-url}}
+    """Teamtailor RSS item (already materialised by fetch_teamtailor):
+      {guid, title, link, description, pubDate, remoteStatus, department,
+       role, locations: [{name, city, country, zip, address}]}.
+    `link` is the user-facing URL of the form /jobs/{numeric-id}-{slug};
+    `guid` is a UUID we use as the stable internal ID.
     """
-    attrs = job.get("attributes", {}) or {}
-    remote_status = (attrs.get("remote-status") or "").strip().lower()
-    location = attrs.get("location") or ""
-    is_remote = remote_status in ("fully-remote", "remote", "remote-only") or "remote" in str(location).lower()
+    locs = job.get("locations") or []
+    if locs:
+        first = locs[0]
+        location = first.get("name") or " / ".join(filter(None, [
+            first.get("city", ""), first.get("country", ""),
+        ]))
+    else:
+        location = ""
+    remote = (job.get("remoteStatus") or "").lower()
+    is_remote = remote == "fully"
+    is_hybrid = remote == "hybrid"
     return {
-        "id":             str(job.get("id", "")),
+        "id":             str(job.get("guid") or job.get("link", "")),
         "company":        company["name"],
-        "title":          attrs.get("title", ""),
-        "url":            attrs.get("careersite-job-url") or "",
-        "location":       location if isinstance(location, str) else (location or {}).get("name", ""),
+        "title":          job.get("title", ""),
+        "url":            job.get("link", ""),
+        "location":       location,
         "is_remote":      is_remote,
-        "workplace_type": "Remote" if is_remote else ("Hybrid" if remote_status == "hybrid" else ""),
-        "department":     attrs.get("department") or "",
-        "published_at":   attrs.get("created-at") or "",
+        "workplace_type": "Remote" if is_remote else ("Hybrid" if is_hybrid else ""),
+        "department":     job.get("department") or job.get("role") or "",
+        "published_at":   job.get("pubDate") or "",
         "source":         company.get("source", "unknown"),
         "ats":            "teamtailor",
-        # Teamtailor's body has HTML; pitch is plain. Prefer pitch when present.
-        "description":    (attrs.get("pitch") or attrs.get("body") or "")[:DESCRIPTION_LIMIT],
+        # Teamtailor's RSS description is HTML — keep raw, downstream
+        # truncation handles length.
+        "description":    (job.get("description") or "")[:DESCRIPTION_LIMIT],
     }
 
 

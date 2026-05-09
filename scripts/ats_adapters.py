@@ -72,7 +72,12 @@ COMEET_API     = "https://www.comeet.co/careers-api/2.0/company/{company_id}/pos
 LEVER_API      = "https://api.lever.co/v0/postings/{slug}?mode=json"
 
 # v3.1.1 additions:
-TEAMTAILOR_API = "https://{slug}.teamtailor.com/api/v1/jobs?page%5Bsize%5D=200"
+# Teamtailor's previously-documented /api/v1/jobs JSON:API endpoint returns
+# 404 for every board tested 2026-05 (Botify, Klarna, Polestar, Oneflow);
+# their public read path is now the RSS feed at /jobs.rss with a custom
+# https://teamtailor.com/locations namespace carrying location + department.
+# Switched here as primary; the RSS feed is well-documented and stable.
+TEAMTAILOR_API = "https://{slug}.teamtailor.com/jobs.rss"
 HOMERUN_API    = "https://api.homerun.co/v1/jobs/?company_subdomain={slug}"
 
 # feature/more-ats: SmartRecruiters / Workable / Recruitee (Easy tier)
@@ -169,20 +174,20 @@ def fetch_active_ids_lever(slug: str, **_) -> Tuple[set, Optional[str]]:
 
 
 def fetch_active_ids_teamtailor(slug: str, **_) -> Tuple[set, Optional[str]]:
-    """Teamtailor JSON:API — returns active jobs at <slug>.teamtailor.com/api/v1/jobs.
+    """Teamtailor: active jobs via per-board RSS feed at <slug>.teamtailor.com/jobs.rss.
 
-    Each job has an `id` field (numeric string). Pagination via JSON:API links.meta.
-    For most company boards under 200 active jobs, single-page fetch suffices.
+    The previously-used /api/v1/jobs JSON:API endpoint returns 404 across
+    every Teamtailor board tested in 2026-05; their public read path is now
+    the RSS feed. Each <item> has a <guid> (UUID) we use as the stable ID.
     """
-    data, err = http_get(TEAMTAILOR_API.format(slug=slug))
+    data, err = http_get(TEAMTAILOR_API.format(slug=slug), accept="application/rss+xml")
     if err:
         return set(), err
     try:
-        body = json.loads(data.decode("utf-8"))
-        items = body.get("data", [])
-        return {str(j.get("id")) for j in items if j.get("id")}, None
-    except Exception as e:
+        root = ET.fromstring(data)
+    except ET.ParseError as e:
         return set(), f"parse:{e}"
+    return {(item.findtext("guid") or "").strip() for item in root.iter("item") if item.findtext("guid")}, None
 
 
 def fetch_active_ids_homerun(slug: str, **_) -> Tuple[set, Optional[str]]:
