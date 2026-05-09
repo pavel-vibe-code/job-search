@@ -6,6 +6,88 @@ All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Chang
 
 ---
 
+## [1.1.1] — 2026-05-09 — doc patch
+
+Backfills CHANGELOG entries for v1.0.1, v1.0.2, and v1.1.0, which were tagged and released without their corresponding changelog updates. No code changes.
+
+### Documentation
+- CHANGELOG: missing entries added for v1.0.1, v1.0.2, v1.1.0
+
+---
+
+## [1.1.0] — 2026-05-09 — 12 ATS adapters + scrape resilience
+
+**Bumps the deterministic-ATS surface from 7 to 12** and fixes two existing adapters that were silently producing zero jobs due to upstream API changes. Plus scrape-extract resilience that bypasses Cloudflare-style bot gating, Notion API 2025-09-03 support, and parallel batched scoring.
+
+### Added — new ATS adapters
+- **SmartRecruiters** (`api.smartrecruiters.com/v1/companies/<slug>/postings`) — paginated, capped at 20 pages = 2000 jobs. URL synth: `jobs.smartrecruiters.com/<slug>/<id>` (the documented `jobAdUrl` field comes back null in practice).
+- **Workable** (`apply.workable.com/api/v1/widget/accounts/<slug>`) — v1 widget endpoint (the v3 `/api/v3/accounts/<slug>/jobs` path in older Workable docs returns 404 on the apply.* host).
+- **Recruitee** (`<slug>.recruitee.com/api/offers/`) — full description + requirements inline.
+- **Personio** (`<slug>.jobs.personio.de/xml`) — XML feed; `.de` TLD canonical, `.com` / `.es` / `.it` accepted equivalently.
+- **BambooHR** (`<slug>.bamboohr.com/careers/list`) — nested location decoding (`location: {city, state}` + `atsLocation: {country, state, province, city}`).
+- New `score-batch` agent for parallel batched scoring (sub-agent dispatched by compile-write).
+
+### Added — scrape resilience
+- `scrape-extract` agent: **sitemap-first probe** across `/career-sitemap.xml`, `/careers-sitemap.xml`, `/jobs-sitemap.xml`, `/sitemap_index.xml`, `/sitemap.xml`, and `/robots.txt` before falling through to page fetch. Bypasses Cloudflare's IP-based bot gating since sitemaps are publicly cached.
+- `diff-scrape.py`: **sustained-failure streak counter** (`state/scrape-streaks.json`, gitignored). Threshold ≥3 consecutive failures surfaces a `warning` field in the diff output. Successful extractions reset; honest 0-job results don't count as failures.
+- Envelope gains `source: "sitemap" | "page"` field for provenance tracking.
+
+### Changed — silently broken adapters fixed
+- **Teamtailor**: `/api/v1/jobs` (returns 404 across every board tested in May 2026) → `/jobs.rss`. RSS items carry richer data: full HTML description, multi-location entries via the `https://teamtailor.com/locations` namespace, remote-status, UUID `guid` we now use as the stable ID. ⚠ ID namespace changes from numeric → UUID; first post-upgrade run will report all currently-tracked Teamtailor jobs as new and the prior numeric IDs as removed.
+- **Homerun**: `api.homerun.co/v1/jobs/?company_subdomain=<slug>` intermittently 404s for boards that exist. New Atom-feed fallback at `feed.homerun.co/<slug>` mirrored on both fetch-and-diff and validate-jobs sides. Same one-time ID-namespace jolt on first post-upgrade run.
+
+### Changed — infrastructure
+- **Notion API**: `Notion-Version` bumped from `2022-06-28` to `2025-09-03`. New `_resolve_data_source_ids()` helper + dispatch through `POST /data_sources/<ds_id>/query`. Falls back to the legacy `POST /databases/<id>/query` endpoint for pre-migration DBs. `_resolve_parent("data_source", id)` now returns a real `{data_source_id: id}` parent (was previously a stub that fell through to `database_id`).
+- **`compile-write`**: Pass 3 scoring now splits survivors into batches of ~10 and dispatches parallel `score-batch` sub-agents. ~4-6× wall-clock speedup, sharper rationales (each sub-agent fresh-context).
+- **`jobs-rescore`**: explicit "scoring is in-context reasoning, not SDK shell-out" Tool Discipline section added — prevents the agent from improvising `import anthropic` / `ANTHROPIC_API_KEY` calls.
+- Cost framing in docs: tokens, not dollars (~500K-1M per run on Opus, ~250-500K on Sonnet).
+
+### Tests
+- 176 unit tests passing (was 172). New URL-recognition tests for each new ATS pattern + dispatch sanity for SmartRecruiters / Workable / Recruitee / Personio / BambooHR.
+
+### Notes
+- The v1.1.0 release dropped on the same day Pavel discovered his tracker DB had become accidentally multi-source via a stray Notion-UI click. The Notion API 2025-09-03 fix was scoped specifically to unblock that — but it's defensive: it works for any tracker DB, single-source or multi-source.
+
+---
+
+## [1.0.2] — 2026-05-05 — repo-flip-to-public release
+
+Cleanup release immediately preceding the GitHub-visibility flip (2026-05-06). Stripped legacy code paths, corrected misleading framing in docs, and added a user-facing GUIDE.md.
+
+### Changed
+- **Cadence framing across docs**: corrected from "automatic weekly cadence" to "plugin runs when invoked; Routines / cron / hooks schedule it." The plugin itself owns no scheduler — that's deliberate design.
+- **Notion framing**: rewritten across README / INSTALL / ARCHITECTURE as a deliberate design choice (chosen as easy-to-set, easy-to-maintain for non-coders) rather than a "user has Notion already" precondition.
+- **Cost framing**: tokens, not dollars (docs reflect that runs draw from Claude.ai subscription quota, not USD billing).
+- **ARCHITECTURE.md**: pre-v1.0 internal version history (v2.x, v3.x development trail) removed for public-facing readability.
+- Legacy code paths removed: pre-v1.0 wizard support, deprecated CLI flag compat shims.
+
+### Added
+- **GUIDE.md** — 475-line user guide: what the plugin does, first-run walkthrough, command reference, common workflows, tracker layout, cost guide, troubleshooting.
+- README links to GUIDE.md from the first-run section.
+
+---
+
+## [1.0.1] — 2026-05-05 — first patch release
+
+Architectural fix + skill polish + scoring discipline.
+
+### Added
+- **`jobs-settings`** skill: edit any single profile field via dialogue; preserves all other fields on write (merge-on-write so partial edits don't blow away unedited config).
+- **`jobs-rescore`** skill: re-evaluate tracker rows in place against the current profile + scoring rubric. Manual upgrade path for past entries when scoring criteria change or model upgrades land.
+- **`/jobs`** menu skill: lists every `jobs-*` command organized by category for discoverability.
+- **`show_low: true`** profile option: exposes Low-verdict matches in the tracker (default: hidden — keeps signal high).
+
+### Changed
+- All skills namespaced under the `jobs-` prefix. Browse them via the `/jobs` menu or list with `/<skill-name>`.
+- `compile-write` now enforces v3 categorical scoring writes: Match + Why Fits + Key Factors all required, no half-populated rows.
+- Tracker schema: `Reasoning` column dropped — consolidated to `Why Fits` as the single rationale field.
+- `http_get`: switched to a real-browser User-Agent to avoid bot-filter 403s on certain ATS endpoints (notably OpenAI's Ashby board).
+
+### Fixed
+- **Architectural**: orchestrator no longer mutates `connectors.json` at runtime. Config files (`config/`) are read-only; runtime state lives in `state/`.
+
+---
+
 ## [1.0.0] — 2026-05-04 — first public release
 
 **Architecture milestone.** Reframes favorites as "extended companies", reimplements scrape ATS as a Claude Code agent (no API key required), and bundles the doc-accuracy + bug-fix work iterated through pre-public development.
