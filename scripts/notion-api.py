@@ -354,23 +354,84 @@ def _extract_title(obj: dict) -> str:
 
 
 def cmd_create_database(args, token):
+    """Create a Notion database under a parent page, then apply the schema's
+    properties to its data source.
+
+    Notion-Version 2025-09-03 changed two things vs 2022-06-28:
+      1. The `parent` object now requires an explicit `type` discriminator
+         (e.g. `{"type": "page_id", "page_id": "..."}`). Without it, some
+         workspaces error out on creation (caught in production 2026-05-09).
+      2. Properties no longer live on the database itself — they live on a
+         data_source within the database. Sending `properties` at the
+         database-create level is silently no-op'd: Notion returns 200 OK
+         and a database with one auto-named "Name" title property, but
+         every other property in the schema is dropped. Fix: create the DB
+         (which auto-creates one data_source named "Name"), then PATCH the
+         data_source — rename the auto title to whatever our schema's title
+         is, then add the rest of the properties in a second PATCH call.
+         (One PATCH would fail with `validation_error: Cannot create new
+         title property` — Notion rejects two title properties in one call.)
+    """
     with open(args.schema) as f:
         schema = json.load(f)
     # Strip underscore-prefixed keys (e.g. "_comment") — they're documentation in
     # the schema files; Notion rejects unknown property types.
     properties = {k: v for k, v in schema.items() if not k.startswith("_")}
+
     payload = {
-        "parent": {"page_id": args.parent_page_id},
+        "parent": {"type": "page_id", "page_id": args.parent_page_id},
         "title": [{"type": "text", "text": {"content": args.title}}],
-        "properties": properties,
     }
     body, err, status = http_request("POST", "/databases", token, payload)
     if err:
         print(json.dumps({"error": err, "status": status, "body": body}), file=sys.stderr)
         sys.exit(1)
+
+    db_id = body.get("id")
+    data_sources = body.get("data_sources") or []
+    ds_id = data_sources[0].get("id") if data_sources else None
+
+    # Apply schema properties via the data_source. The DB starts with one
+    # auto-created data_source carrying a default `Name` title property.
+    if ds_id and properties:
+        # Identify our schema's title field (there must be exactly one).
+        title_field = next((k for k, v in properties.items() if v.get("title") is not None), None)
+
+        # Step 1: rename the auto `Name` title → our schema's title field name
+        # (keeping it as title type — Notion allows renaming the title property
+        # but not adding a second title or changing its type).
+        if title_field and title_field != "Name":
+            _, perr, pstatus = http_request(
+                "PATCH", f"/data_sources/{ds_id}", token,
+                {"properties": {"Name": {"name": title_field}}},
+            )
+            if perr:
+                print(json.dumps({
+                    "error": "data_source_title_rename_failed",
+                    "status": pstatus, "detail": perr,
+                    "db_id": db_id, "ds_id": ds_id,
+                }), file=sys.stderr)
+                sys.exit(1)
+
+        # Step 2: add all non-title properties.
+        non_title_props = {k: v for k, v in properties.items() if v.get("title") is None}
+        if non_title_props:
+            _, perr, pstatus = http_request(
+                "PATCH", f"/data_sources/{ds_id}", token,
+                {"properties": non_title_props},
+            )
+            if perr:
+                print(json.dumps({
+                    "error": "data_source_properties_apply_failed",
+                    "status": pstatus, "detail": perr,
+                    "db_id": db_id, "ds_id": ds_id,
+                }), file=sys.stderr)
+                sys.exit(1)
+
     print(json.dumps({
         "ok": True,
-        "id": body.get("id"),
+        "id": db_id,
+        "data_source_id": ds_id,
         "url": body.get("url"),
         "title": args.title,
     }, indent=2))

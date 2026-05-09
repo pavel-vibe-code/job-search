@@ -6,6 +6,29 @@ All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Chang
 
 ---
 
+## [1.2.1] — 2026-05-09 — fix create-database under Notion API 2025-09-03
+
+**Hot patch.** v1.2.0's auto-creation of the Run Log DB succeeded structurally — the DB was created — but came back with **zero schema properties** because the v1.1.1 `cmd_create_database` was using the pre-2025-09-03 request shape.
+
+Two distinct issues, both surfaced by a fresh routine fire:
+
+### Fixed
+- **Parent object now requires `type` discriminator.** The 2025-09-03 contract wants `{"parent": {"type": "page_id", "page_id": "..."}}` instead of the bare `{"page_id": "..."}` we'd been sending. Some workspaces still accept the old shape; the user's didn't. (Initially patched inline by the routine on a temporary branch — incorporated here permanently.)
+- **Properties live on data_sources, not databases.** Under 2025-09-03, sending `properties` at the database-level is silently no-op'd: Notion returns 200 OK and a database with one auto-named `Name` title property, but every other property in the schema is dropped. Real fix: create the database (returns one auto-data_source), then PATCH the data_source — first to rename its auto `Name` title to whatever our schema's title field is called, then a second PATCH to add the rest. (Single-PATCH would fail with `Cannot create new title property`; Notion rejects two title properties in one call.)
+
+### Migration
+
+If your routine fired v1.2.0 and you have an empty `AI 50 Run Log` DB sitting under your parent page (zero properties): two paths.
+
+- **Recommended**: delete the empty DB in Notion. Next routine fire under v1.2.1 will recreate it correctly via the orchestrator's discover step.
+- **Alternative**: run the two-step PATCH manually if you don't want to lose the DB ID. Steps documented in commit message and inline comments in `scripts/notion-api.py:cmd_create_database`.
+
+### Notes
+- The user's Run Log DB was patched inline during diagnosis, so they don't need either path — their DB now has all 17 properties.
+- 176 unit tests still pass. Notion-creation paths are not under unit-test coverage (network-bound); live verification was the routine fire that surfaced this.
+
+---
+
 ## [1.2.0] — 2026-05-09 — Run Log DB + version-at-start
 
 **Persistent run telemetry in Notion.** Each routine fire now writes a row to a new Run Log database — version, counts, errors, token usage, all queryable over time. Plus a defensive "version announcement" at run start so the version is visible mid-trace, not only in the final banner.
