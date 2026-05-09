@@ -6,6 +6,21 @@ All notable changes to the AI 50 Job Search plugin. Format follows [Keep a Chang
 
 ---
 
+## [1.2.2] — 2026-05-09 — banner counts include extended companies
+
+**Counting fix.** v1.2.1's first run revealed the banner and Run Log row were under-counting by ignoring the user's extended-companies list — `Companies Configured: 50` instead of `68`, `Total Jobs in ATS: 4,975` instead of `~6,710`. The actual fetch loop hit all 68 companies; only the reporting was wrong.
+
+### Fixed
+- **Banner accounting**: `jobs-run/SKILL.md` Step F template now explicitly requires the merged `companies.json + custom-companies` count for `Configured / Checked / Skipped / Errored / Total Jobs in ATS`. Added a "Counting discipline" subsection spelling out each metric's definition so the orchestrator can't silently fall back to baseline-only stats.
+- **Banner template change**: `Fetch:` line now reads `{configured} configured | {checked} checked | {skipped} skipped | {errored} errored` (configured wasn't surfaced before; now it is, making partial-counting bugs visible at a glance).
+- **Run Log row payload**: Step F.1 schema annotations now spell out the merged-list source for each numeric field, with explicit notes that single-list values make the log useless for telemetry.
+
+### Notes
+- The user's stale empty Run Log DB at `b9237302-...` (created during v1.2.0's broken create-database call, before v1.2.1's fix) was archived via API as part of this fix's diagnosis. The working Run Log DB is at `e246081e-...` and continues to receive new rows.
+- 176 unit tests still pass. Banner-rendering paths are not directly unit-tested (orchestrator-driven, depends on agent prompt adherence); live verification was the v1.2.1 routine fire that surfaced the under-count.
+
+---
+
 ## [1.2.1] — 2026-05-09 — fix create-database under Notion API 2025-09-03
 
 **Hot patch.** v1.2.0's auto-creation of the Run Log DB succeeded structurally — the DB was created — but came back with **zero schema properties** because the v1.1.1 `cmd_create_database` was using the pre-2025-09-03 request shape.

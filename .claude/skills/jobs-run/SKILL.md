@@ -471,11 +471,24 @@ Render the banner even when:
 
 Skipping the banner is a regression — the user uses it to verify the version, see what was checked, and confirm the run completed. Treat it as the run's commit, not its appendix.
 
+### Counting discipline (v1.2.2+)
+
+The banner's company counts MUST reflect the **merged set** of `companies.json.companies` + `custom-companies` (Notion-hydrated extended companies in cloud mode, or `config/custom-companies.json` in local mode). If you only count one of the two lists, you'll under-report the user's actual tracked surface — that's what surfaced in v1.2.1's run log (Configured=50 instead of 68 because only the baseline list was counted).
+
+Specifically:
+- **`{configured}`** = `len(companies.json[companies]) + len(custom-companies)` — the user's full tracked set
+- **`{checked}`** = number that fetch-and-diff actually attempted to fetch (excludes `ats: skip`, `external`, `static_roles` — those are reported separately at the bottom of the banner)
+- **`{skipped}`** = count of `ats: skip` entries across both lists
+- **`{errored}`** = count of fetch failures (HTTP errors, parse errors, 403 / 503 / etc.) — a subset of checked
+- **`{total_jobs_in_ats}`** = sum of all jobs returned across all fetches, both lists merged
+
+If fetch-and-diff's stats output gives you a partial number (only baseline, only extended), reconcile yourself: the orchestrator owns the canonical count by virtue of holding both files. Do not paper over partial stats; merge them yourself before rendering.
+
 ```
 ## AI 50 Job Search v{plugin_version} — {date}
 
-Fetch: {N} companies checked | {N} skipped | {N} errored
-Total jobs in ATS: {N} | New this run: {N} raw → {N} after filter
+Fetch: {configured} configured | {checked} checked | {skipped} skipped | {errored} errored
+Total jobs in ATS: {total_jobs_in_ats} | New this run: {N} raw → {N} after filter
 Validation: {N} live confirmed (of {N} checked)
 Tracker: {N} new entries written | {N} marked closed
 State: {Notion DB ✓ | local file ✓}
@@ -515,7 +528,9 @@ Immediately after rendering the banner, write a single row to the Run Log databa
 
 **Skip Run Log write if `run_log_database_id` is missing** (existing pre-v1.2.0 install where discover hasn't auto-created the DB yet). In that case: render the banner anyway, print *"Note: Run Log DB missing — first v1.2.0 fire will auto-create it via discover; future runs will log here."* and continue. The orchestrator's discover step (P-3) is responsible for creating the DB on first sight; this step just consumes the resulting ID.
 
-**Row payload** (use `notion-api.py create-pages` with `--parent-id <run_log_database_id> --parent-type database`):
+**Row payload** (use `notion-api.py create-pages` with `--parent-id <run_log_database_id> --parent-type database`).
+
+The numeric fields here MUST follow the same counting discipline as the banner above — count the **merged** company list, not just the AI 50 baseline. If you accidentally write only-baseline numbers here, the Run Log becomes useless for time-series telemetry (the user's actual surface won't match what's logged).
 
 ```json
 {
@@ -523,11 +538,11 @@ Immediately after rendering the banner, write a single row to the Run Log databa
     "Run Date":             "{ISO 8601 datetime, second precision}",
     "Version":              "{plugin_version from VERSION file}",
     "Status":               "ok | partial | error",
-    "Companies Configured": <int>,
-    "Companies Checked":    <int>,
-    "Companies Errored":    <int>,
-    "Companies Skipped":    <int>,
-    "Total Jobs in ATS":    <int>,
+    "Companies Configured": <int — len(companies.json[companies]) + len(custom-companies); MUST be the merged total>,
+    "Companies Checked":    <int — fetch-attempted across both lists, excludes skip/external/static_roles>,
+    "Companies Errored":    <int — HTTP errors / parse errors across both lists>,
+    "Companies Skipped":    <int — ats=skip entries across both lists>,
+    "Total Jobs in ATS":    <int — sum of jobs returned across both lists>,
     "New Candidates":       <int>,
     "Tracker Writes":       <int>,
     "Hot Matches":          <int>,
